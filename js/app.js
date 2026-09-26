@@ -96,7 +96,10 @@ matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => sta
 
 // ------------------------------------------------------------------ shell
 function renderShell() {
-  document.body.innerHTML = `
+  // Render into our own root so anything else in <body> (like inlined styles) survives.
+  let root = document.getElementById('krypt');
+  if (!root) { root = document.createElement('div'); root.id = 'krypt'; document.body.append(root); }
+  root.innerHTML = `
   <a class="skip" href="#feed">Skip to messages</a>
   <div class="app" id="app">
     <header class="titlebar" id="titlebar"></header>

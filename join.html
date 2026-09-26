@@ -72,7 +72,9 @@
     const host = D.people[D.rooms[c.rooms[0]].owner];
     document.title = `Join ${c.name} — Krypt`;
 
-    document.body.innerHTML = `<div class="join">
+    const root = document.createElement('div');
+    document.body.append(root);
+    root.innerHTML = `<div class="join">
       <header class="join-top">${brandMark(30)}<b>Krypt</b><a class="btn sm ghost" href="index.html">Open Krypt</a></header>
       <main class="join-main"><div>
         <section class="invite" id="invite" aria-labelledby="joinTitle">
