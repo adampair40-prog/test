@@ -173,9 +173,13 @@ function renderSide() {
     <div class="footer-note" title="Keys never leave your devices">${icon('lock', 'xs')} End-to-end encrypted</div>`;
   $('#app')?.classList.toggle('drawer', state.drawer);
   $$('#side .list').forEach(watchEdges);
+  const cur = state.dm || state.room;
+  if (lastSideCurrent && lastSideCurrent !== cur) $('#side .row[aria-current="true"]')?.classList.add('became-current');
+  lastSideCurrent = cur;
   updateTitle();
 }
 
+let lastSideCurrent = null;
 // Fades a scroller's edge only where more content is hidden beyond it.
 function edgeState(el) {
   const x = el.classList.contains('tabstrip');
@@ -196,6 +200,10 @@ function updateTitle() {
 
 function renderTabs() {
   const nav = $('#tabs');
+  // Keep where the underline was so it can slide instead of jumping.
+  const old = $('.tab-indicator', nav); const scope = state.dm || state.room;
+  const from = old && nav.dataset.scope === scope ? { l: old.style.left, w: old.style.width } : null;
+  nav.dataset.scope = scope;
   if (state.dm) {
     const p = person(D.dms.find((d) => d.id === state.dm).with);
     nav.innerHTML = `<div class="tabstrip" role="tablist"><button class="tab" role="tab" aria-selected="true">${icon('message')}${esc(p.name)}${state.muted.has(state.dm) ? `<span class="muted-mark" title="Muted">${icon('bellOff', 'xs')}</span>` : ''}</button><span class="tab-indicator"></span></div>
@@ -213,6 +221,8 @@ function renderTabs() {
       <button class="ibtn keep" data-act="roomMenu" aria-haspopup="menu" aria-expanded="false" aria-label="Room options">${icon('more', 'sm')}</button>
       <button class="btn room-settings keep" data-act="roomSettings" aria-label="Room settings" title="Room settings">${icon('settings', 'sm')}<span>Room settings</span></button></div>`;
   }
+  const ind = $('.tab-indicator', nav);
+  if (from && ind) { ind.style.transition = 'none'; ind.style.left = from.l; ind.style.width = from.w; void ind.offsetWidth; ind.style.transition = ''; }
   requestAnimationFrame(moveIndicator);
   watchEdges($('#tabstrip') || $('.tabstrip'));
   updateTitle();
@@ -265,8 +275,8 @@ function chatView(key, kind) {
       <button class="ibtn boxed keep" data-act="convMenu" aria-label="More">${icon('more')}</button>`, '<span class="e2e" title="End-to-end encrypted">' + icon('lock') + 'Encrypted</span>')}
     ${state.searchOpen ? `<div class="searchbar">${icon('search', 'sm')}<input id="searchInput" placeholder="Search messages" value="${esc(state.search)}" aria-label="Search messages"><small id="searchCount"></small><button class="ibtn sm" data-act="search" aria-label="Close search">${icon('x', 'sm')}</button></div>` : ''}
     ${state.searchOpen ? '' : pinbarHtml(key)}
-    <div class="feed" id="feed" tabindex="-1" aria-live="polite"><div class="feed-inner" id="feedInner">${feedHtml(key)}</div></div>
-    <button class="jump" id="jump" data-act="jumpLatest">${icon('arrowDown', 'sm')} New messages</button>
+    <div class="feed-wrap"><div class="feed" id="feed" tabindex="-1" aria-live="polite"><div class="feed-inner" id="feedInner">${feedHtml(key)}</div></div>
+    <button class="jump" id="jump" data-act="jumpLatest">${icon('arrowDown', 'sm')} New messages</button></div>
     <div class="typing" id="typing"></div>
     ${composerHtml(place, visibility)}
     <div class="dropzone" id="dropzone"><div>${icon('upload')}<h3 style="margin:0">Drop to share</h3><p style="margin:4px 0 0;color:var(--text-2)">Files are encrypted before they leave this browser</p></div></div>
@@ -369,7 +379,8 @@ function messageHtml(m, cont, list, q = '') {
     ? `<div class="linkcard"><small>krypt.example · Shared document</small><b>Friday co-op — plan</b><p>Goals, roles and streaming settings for Friday night.</p></div>` : '';
   const reactions = m.reactions.length ? `<div class="reactions">${m.reactions.map((r) => `<button class="reaction ${r.users.includes('me') ? 'mine' : ''}" data-act="react" data-id="${m.id}" data-e="${r.e}" title="${esc(r.users.map((u) => person(u).name).join(', '))}">${r.e} ${r.users.length}</button>`).join('')}<button class="reaction add" data-act="reactPick" data-id="${m.id}" aria-label="Add reaction">${icon('smile', 'xs')}</button></div>` : '';
   const editing = state.editing === m.id;
-  return `<article class="msg ${cont ? 'cont' : ''} ${replyTo ? 'has-reply' : ''} ${mentionsMe ? 'mention' : ''} ${editing ? 'editing' : ''}" data-mid="${m.id}" aria-label="Message from ${esc(p.name)}">
+  const arrive = !m.seen && Date.now() - m.t < 4000; m.seen = true;
+  return `<article class="msg ${arrive ? 'arrive' : ''} ${cont ? 'cont' : ''} ${replyTo ? 'has-reply' : ''} ${mentionsMe ? 'mention' : ''} ${editing ? 'editing' : ''}" data-mid="${m.id}" aria-label="Message from ${esc(p.name)}">
     ${replyTo ? `<div class="reply-ref" data-act="gotoMsg" data-id="${replyTo.id}">${avatar(replyTo.author, 'xs')}<b>${esc(person(replyTo.author).name)}</b><span>${esc((replyTo.text || '').slice(0, 90))}</span></div>` : ''}
     ${avatar(m.author, 'md', false, `data-act="profile" data-id="${m.author}"`)}
     ${cont ? `<span class="hovertime">${clock(m.t)}</span>` : `<header><b data-act="profile" data-id="${m.author}">${esc(p.name)}</b><time datetime="${new Date(m.t).toISOString()}">${clock(m.t)}</time>${isPinned(m.id) ? `<span class="pinned-mark" title="Pinned">${icon('pin', 'xs')}Pinned</span>` : ''}</header>`}
@@ -528,7 +539,8 @@ function simulateReply(key, text) {
       refreshFeed(false); if (!near) $('#jump')?.classList.add('show');
     } else {
       state.unread[key] = (state.unread[key] || 0) + 1; renderTabs();
-      toast(`${person(who).name}`, 'New message', 'message');
+      const msgs = D.messages[key]; const where = dm ? 'Direct message' : `${D.channels[key]?.name} · ${D.rooms[roomOf(key)]?.name}`;
+      if (!state.muted.has(key)) toast(person(who).name, `${where} — ${msgs.at(-1).text}`, 'message', '', () => { if (dm) openDm(key); else { const r = roomOf(key); const c = D.communities.find((x) => x.rooms.includes(r)); go(c.id, r, key); } }, avatar(who, 'sm'));
     }
     renderSide();
   }, 2200 + Math.random() * 1400);
@@ -729,7 +741,7 @@ function calendarView() {
     const d = new Date(start); d.setDate(start.getDate() + i);
     const evs = D.events.filter((e) => { const x = new Date(); x.setDate(x.getDate() + e.day); return x.toDateString() === d.toDateString(); });
     cells.push(`<div class="cal-cell ${d.getMonth() !== month ? 'other' : ''} ${d.toDateString() === today ? 'today' : ''} ${d.getDay() % 6 === 0 ? 'weekend' : ''}" data-act="addEvent" data-date="${d.toISOString()}">
-      <span class="d">${d.getDate()}</span>${evs.map((e) => `<span class="ev" style="--eh:${e.hue}" title="${esc(e.title)} · ${pad(e.h)}:00">${pad(e.h)}:00 ${esc(e.title)}</span>`).join('')}</div>`);
+      <span class="d">${d.getDate()}</span>${evs.map((e) => `<span class="ev" role="button" tabindex="0" data-act="eventInfo" data-ev="${D.events.indexOf(e)}" style="--eh:${e.hue}" title="${esc(e.title)} · ${pad(e.h)}:00">${pad(e.h)}:00 ${esc(e.title)}</span>`).join('')}</div>`);
   }
   const upcoming = D.events.filter((e) => e.day >= 0).sort((a, b) => a.day - b.day)[0];
   return `<section class="view">${header('Calendar', `${esc(D.rooms[state.room].name)} / Shared calendar · everyone in the room can add events`, `<button class="btn primary" data-act="addEvent">${icon('plus', 'sm')}New event</button>`)}
@@ -753,6 +765,10 @@ function afterDocs() {
   const body = $('#docBody');
   const outline = () => { $('#outline').innerHTML = `<h4>On this page</h4>` + $$('h2', body).map((h, i) => { h.id = 'h' + i; return `<a href="#h${i}">${esc(h.textContent)}</a>`; }).join(''); };
   outline();
+  const wrap = $('.paper-wrap');
+  $('#outline').addEventListener('click', (e) => { const a = e.target.closest('a'); if (!a) return; e.preventDefault(); $(a.getAttribute('href'), body)?.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' }); });
+  const spy = () => { const hs = $$('h2', body); let cur = 0; hs.forEach((h, i) => { if (h.getBoundingClientRect().top - wrap.getBoundingClientRect().top < 80) cur = i; }); $$('#outline a').forEach((a, i) => a.classList.toggle('current', i === cur)); };
+  wrap.addEventListener('scroll', spy, { passive: true }); spy();
   // A collaborator's caret, parked after the first paragraph.
   const p = $('p', body); if (p) p.insertAdjacentHTML('beforeend', `<span class="remote-caret" contenteditable="false" style="--h:212" data-name="Alex"></span>`);
   let t; body.addEventListener('input', () => { $('#saveState').textContent = 'Saving…'; clearTimeout(t); t = setTimeout(() => { $('#saveState').textContent = 'Saved'; outline(); }, 700); });
@@ -817,24 +833,39 @@ function modal(html, { cls = '', label = 'Dialog' } = {}) {
   const s = document.createElement('div'); s.className = 'scrim'; s.id = 'scrim';
   s.innerHTML = `<div class="modal ${cls}" role="dialog" aria-modal="true" aria-label="${esc(label)}" tabindex="-1">${html}</div>`;
   s.addEventListener('mousedown', (e) => { if (e.target === s) closeModal(); });
+  lockBackground(s);
   document.body.append(s);
-  s.dataset.return = document.activeElement?.dataset?.act || '';
   // Settings opens on its nav, not on a colour picker halfway down the pane.
   setTimeout(() => (s.querySelector('[autofocus]') || (cls.includes('settings') ? null : s.querySelector('input:not([readonly])')) || s.querySelector('.modal'))?.focus({ preventScroll: true }), 30);
   return s;
 }
+// While a dialog is open the app behind it can't be tabbed into or clicked, and
+// focus goes back to whatever opened the dialog when it closes.
+let returnFocus = null;
+function lockBackground() {
+  if (!$('#scrim')) returnFocus = document.activeElement;
+  $('#app')?.setAttribute('inert', ''); closePopover();
+}
 function closeModal() {
   const s = $('#scrim'); if (!s) return;
+  $('#app')?.removeAttribute('inert');
+  const back = returnFocus; returnFocus = null;
+  if (back?.isConnected && !back.closest('.scrim')) setTimeout(() => back.focus({ preventScroll: true }), 0);
   s.removeAttribute('id'); s.classList.add('closing'); $$('[id]', s).forEach((x) => x.removeAttribute('id'));
   setTimeout(() => s.remove(), reduceMotion() ? 0 : 170);
   micStop();
 }
 
-function toast(title, sub = '', ic = 'info', kind = '') {
-  const el = document.createElement('div'); el.className = `toast ${kind}`;
-  el.innerHTML = `${icon(ic)}<div><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</div>`;
+function toast(title, sub = '', ic = 'info', kind = '', onClick = null, lead = '') {
+  const el = document.createElement(onClick ? 'button' : 'div'); el.className = `toast ${kind} ${onClick ? 'clickable' : ''}`;
+  el.innerHTML = `${lead || icon(ic)}<div><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</div>${onClick ? `<span class="go">${icon('arrowRight', 'sm')}</span>` : ''}`;
+  if (onClick) el.addEventListener('click', () => { dismiss(); onClick(); });
   $('#toasts').append(el);
-  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 240); }, 3200);
+  const toasts = $$('#toasts .toast:not(.out)'); if (toasts.length > 3) toasts[0].classList.add('out');
+  let t;
+  const dismiss = () => { clearTimeout(t); el.classList.add('out'); setTimeout(() => el.remove(), 240); };
+  const arm = () => { t = setTimeout(dismiss, onClick ? 5200 : 3200); };
+  el.addEventListener('mouseenter', () => clearTimeout(t)); el.addEventListener('mouseleave', arm); arm();
 }
 
 const EMOJI = ['👍', '❤️', '😂', '🔥', '🎉', '😮', '😢', '🙏', '👀', '💯', '✨', '🐸', '🍿', '🎮', '☕', '🚀', '😎', '🤝', '🥲', '😅', '🤔', '👏', '💀', '✅'];
@@ -956,6 +987,7 @@ function openPalette(initial = '') {
   s.innerHTML = `<div class="cmdk" role="dialog" aria-modal="true" aria-label="Command palette"><div class="q">${icon('search')}<input id="cmdkInput" placeholder="Jump to a channel, person, or action…" autocomplete="off" aria-label="Search" value="${esc(initial)}"><kbd>Esc</kbd></div>
     <div class="results" id="cmdkResults" role="listbox"></div><div class="foot"><span><kbd>↑</kbd><kbd>↓</kbd> navigate</span><span><kbd>Enter</kbd> open</span><span><kbd>Esc</kbd> close</span><span style="margin-left:auto">Tip: type “share”, “light”, or a friend’s name</span></div></div>`;
   s.addEventListener('mousedown', (e) => { if (e.target === s) closeModal(); });
+  lockBackground(s);
   document.body.append(s);
   const input = $('#cmdkInput'), results = $('#cmdkResults');
   const all = commandItems(); let shown = [], active = 0;
@@ -1098,12 +1130,14 @@ function sharePicker() {
   });
 }
 function inviteModal() {
-  const link = `https://krypt.example/join#${community().id}-${Math.random().toString(36).slice(2, 10)}`;
+  closePopover();
+  const code = `${community().id}-${Math.random().toString(36).slice(2, 10)}`;
+  const link = `https://krypt.example/join#${code}`;
   modal(`<header>${icon('link')}<h2>Invite people to ${esc(community().name)}</h2><button class="ibtn" data-act="closeModal" aria-label="Close">${icon('x')}</button></header>
     <div class="mbody"><p style="margin:0 0 14px;color:var(--text-2)">Anyone with this link can join. The secret after <code>#</code> never reaches the server’s logs.</p>
-    <div style="display:flex;gap:8px"><input class="input" readonly value="${link}" aria-label="Invite link" onfocus="this.select()"><button class="btn primary" data-act="toastCopy">${icon('copy', 'sm')}Copy</button></div>
+    <div style="display:flex;gap:8px"><input class="input" id="inviteLink" readonly value="${link}" aria-label="Invite link" onfocus="this.select()"><button class="btn primary" data-act="copyNewInvite" data-id="${code}">${icon('copy', 'sm')}Copy</button></div>
     <div class="field" style="margin-top:14px"><div class="label">Expires</div>${seg('expire', '7d', [['1d', '1 day'], ['7d', '7 days'], ['never', 'Never']])}</div>
-    <p style="margin:8px 0 0;font-size:var(--fs-caption);color:var(--text-3)">See what they’ll see: <a href="join.html">open the invite page</a></p></div>`, { label: 'Invite people' });
+    <p class="invite-note" id="inviteNote">Expires in 7 days. See what they’ll see: <a href="join.html#${code}">open the invite page</a></p></div>`, { label: 'Invite people' });
 }
 // ------------------------------------------------------------------ community settings
 const CS_PAGES = [['overview', 'Overview', 'globe'], ['members', 'Members', 'users'], ['roles', 'Roles', 'shield'], ['invites', 'Invites', 'link'], ['danger', 'Leave or delete', 'alert']];
@@ -1158,7 +1192,7 @@ function renderCsPane() {
       const owner = roleOf('me') === 'Owner';
       pane.innerHTML = `<h3>Leave or delete</h3><p class="lede">These can’t be undone from here.</p>
         <div class="danger-card"><div><b>Leave ${esc(c.name)}</b><small>${owner ? 'You own this community. Make someone else an owner before you leave.' : 'You’ll need a new invite to come back.'}</small></div><button class="btn danger" data-act="leaveCommunity" ${owner ? 'disabled' : ''}>Leave</button></div>
-        <div class="danger-card"><div><b>Delete ${esc(c.name)}</b><small>Removes every room, message and file for everyone. Type <b>${esc(c.name)}</b> to confirm.</small><input class="input sm" id="csDeleteName" placeholder="${esc(c.name)}" autocomplete="off" aria-label="Type the community name to confirm" style="margin-top:10px;max-width:260px"></div><button class="btn danger" id="csDelete" data-act="deleteCommunity" disabled>Delete</button></div>`;
+        <div class="danger-card"><div><b>Delete ${esc(c.name)}</b><small>Removes every room, message and file for everyone. Type <b>${esc(c.name)}</b> to confirm.</small><input class="input sm" id="csDeleteName" placeholder="Type ${esc(c.name)}" autocomplete="off" aria-label="Type the community name to confirm" style="margin-top:10px;max-width:260px"></div><button class="btn danger" id="csDelete" data-act="deleteCommunity" disabled>Delete</button></div>`;
       const inp = $('#csDeleteName', pane);
       inp.addEventListener('input', () => { $('#csDelete').disabled = inp.value.trim() !== c.name; });
       break;
@@ -1351,6 +1385,15 @@ const act = {
     openPopover(el, `<div class="menu-label">${esc(D.rooms[state.room].name)}</div><button class="menu-item" data-act="roomSettings">${icon('settings')}Room settings</button><button class="menu-item" data-act="newChannel">${icon('plus')}Add a channel</button><button class="menu-item" data-act="invite">${icon('users')}Invite people</button><div class="menu-sep"></div><button class="menu-item" data-act="markRead">${icon('check')}Mark all as read</button><button class="menu-item" data-act="muteRoom">${icon(roomMuted() ? 'bell' : 'bellOff')}${roomMuted() ? 'Unmute room' : 'Mute room'}</button><button class="menu-item" data-act="toastCopy">${icon('link')}Copy room link</button>`, { align: 'end' });
   },
   roomSettings() { roomSettingsModal(); },
+  copyNewInvite(el) {
+    const exp = $('[data-k="expire"][aria-pressed="true"]')?.dataset.v || '7d';
+    const expires = { '1d': 'in 1 day', '7d': 'in 7 days', never: 'never' }[exp];
+    if (!D.invites.some((i) => i.id === el.dataset.id)) D.invites.unshift({ id: el.dataset.id, community: community().id, by: 'me', uses: 0, expires });
+    else D.invites.find((i) => i.id === el.dataset.id).expires = expires;
+    navigator.clipboard?.writeText($('#inviteLink').value).catch(() => $('#inviteLink').select());
+    el.innerHTML = icon('check', 'sm') + 'Copied'; setTimeout(() => { if (el.isConnected) el.innerHTML = icon('copy', 'sm') + 'Copy'; }, 1600);
+    toast('Invite link copied', expires === 'never' ? 'This link never expires' : `It stops working ${expires}`, 'link', 'ok');
+  },
   copyInvite(el) { navigator.clipboard?.writeText('https://krypt.example/join#' + el.dataset.id).catch(() => {}); toast('Invite link copied', 'Paste it anywhere', 'link', 'ok'); },
   revokeInvite(el) { const i = D.invites.findIndex((x) => x.id === el.dataset.id); if (i >= 0) D.invites.splice(i, 1); renderCsPane(); toast('Invite revoked', 'That link no longer works', 'link'); },
   leaveCommunity() { toast('Make someone else an owner first', 'Then you can leave', 'info', 'warn'); },
@@ -1434,7 +1477,19 @@ const act = {
   },
   // calendar / tasks
   cal(el) { const d = Number(el.dataset.d); state.calendarOffset = d === 0 ? 0 : state.calendarOffset + d; renderMain(); },
+  eventInfo(el) {
+    const e = D.events[Number(el.dataset.ev)]; if (!e) return;
+    const d = new Date(); d.setDate(d.getDate() + e.day);
+    const going = e.who.includes('me');
+    const pop = openPopover(el, `<div class="ev-card" style="--eh:${e.hue}"><div class="ev-top"><i></i><div><b>${esc(e.title)}</b><small>${d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })} · ${pad(e.h)}:00</small></div></div>
+      <div class="ev-who">${e.who.map((w) => avatar(w, 'xs')).join('')}<span>${e.who.length} going${going ? ' · including you' : ''}</span></div>
+      <div class="ev-actions"><button class="btn sm ${going ? '' : 'primary'}" data-act="rsvp" data-ev="${el.dataset.ev}">${icon(going ? 'x' : 'check', 'sm')}${going ? 'Can’t make it' : 'I’m going'}</button><button class="btn sm danger" data-act="deleteEvent" data-ev="${el.dataset.ev}">${icon('trash', 'sm')}Delete</button></div></div>`, { cls: 'ev-pop' });
+    pop.addEventListener('click', (x) => { if (!x.target.closest('[data-act]')) x.stopPropagation(); });
+  },
+  rsvp(el) { const e = D.events[Number(el.dataset.ev)]; const on = !e.who.includes('me'); e.who = on ? [...e.who, 'me'] : e.who.filter((w) => w !== 'me'); closePopover(); renderMain(); toast(on ? 'You’re going' : 'Marked as not going', e.title, 'calendar', on ? 'ok' : ''); },
+  deleteEvent(el) { const [e] = D.events.splice(Number(el.dataset.ev), 1); closePopover(); renderMain(); toast('Event deleted', e.title, 'trash'); },
   addEvent(el) {
+    if (popover?.anchor === el) { closePopover(); return; }
     const date = el.dataset.date ? new Date(el.dataset.date) : new Date();
     const pop = openPopover(el, `<div style="padding:6px;display:grid;gap:8px;width:260px"><div class="menu-label" style="padding:0">New event · ${date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</div><input class="input sm" id="evTitle" placeholder="What’s happening?" autocomplete="off"><div style="display:flex;gap:8px"><input class="input sm" id="evHour" type="number" min="0" max="23" value="20" style="width:76px" aria-label="Hour"><button class="btn sm primary" id="evSave" style="flex:1;justify-content:center">Add to calendar</button></div></div>`, { keepFocus: true });
     $('#evTitle').focus();
@@ -1457,6 +1512,7 @@ const act = {
     const { k, v } = el.dataset;
     if (['mode', 'density', 'motion'].includes(k)) { state.theme[k] = v; applyTheme(k === 'mode'); }
     else if (k === 'quality' || k === 'codec') { state.share[k] = v; store.set('share', state.share); }
+    else if (k === 'expire') { const n = $('#inviteNote'); if (n) n.firstChild.textContent = v === 'never' ? 'Never expires. See what they’ll see: ' : `Expires in ${v === '1d' ? '1 day' : '7 days'}. See what they’ll see: `; }
     $$(`[data-act="set"][data-k="${k}"]`).forEach((b) => b.setAttribute('aria-pressed', b.dataset.v === v));
     if (k === 'mode') setTimeout(rerenderPane, 50);
   },
@@ -1507,9 +1563,15 @@ document.addEventListener('keydown', (e) => {
   if (mod && e.shiftKey && e.key.toLowerCase() === 'd') { e.preventDefault(); act.deafen(); return; }
   if (mod && e.key.toLowerCase() === 'f' && (state.dm || D.channels[state.channel]?.type === 'text')) { e.preventDefault(); if (!state.searchOpen) act.search(); else $('#searchInput')?.focus(); return; }
   if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) { e.preventDefault(); stepChannel(e.key === 'ArrowUp' ? -1 : 1); return; }
+  if (popover && (e.key === 'ArrowDown' || e.key === 'ArrowUp') && !popover.el.classList.contains('mention-pop') && !/INPUT|TEXTAREA/.test(e.target.tagName)) {
+    const items = $$('.menu-item:not([disabled]), .emoji-grid button, .pp-item button', popover.el); if (items.length) {
+      e.preventDefault(); const i = items.indexOf(document.activeElement);
+      items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus(); return;
+    }
+  }
   if (e.key === 'Escape') {
     if ($('#lightbox')) { closeLightbox(); return; }
-    if (popover) { closePopover(); return; }
+    if (popover) { const a = popover.anchor; const inside = popover.el.contains(document.activeElement); closePopover(); if (inside) a?.focus?.({ preventScroll: true }); return; }
     if ($('#scrim')) { closeModal(); return; }
     if (state.voice.focus && D.channels[state.channel]?.type === 'voice') { state.voice.focus = false; renderMain(); return; }
     if (state.searchOpen) { act.search(); return; }
