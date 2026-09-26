@@ -26,6 +26,7 @@ const state = {
   theme: store.get('theme', { preset: 'fern', custom: null, accent: null, mode: 'dark', reading: 15.5, density: 'cozy', motion: 'system' }),
   notify: store.get('notify', { mentions: true, dms: true, sounds: true, desktop: false }),
   status: 'online',
+  muted: new Set(),
 };
 for (const d of D.dms) state.unread[d.id] = d.unread || state.unread[d.id] || 0;
 const expandedGroups = new Set();
@@ -161,7 +162,7 @@ function renderSide() {
     const last = lastMsg(d.id); const unread = state.unread[d.id] || 0;
     return `<button class="row ${unread ? 'unread' : ''}" data-act="dm" data-id="${d.id}" aria-current="${state.dm === d.id}">
       ${avatar(d.with, 'md', true, 'style="--dot-ring: var(--sidebar)"')}
-      <span class="body"><span class="top"><span class="name">${esc(person(d.with).name)}</span><span class="time">${last ? ago(last.t) : ''}</span></span>
+      <span class="body"><span class="top"><span class="name">${esc(person(d.with).name)}${state.muted.has(d.id) ? `<span class="muted-mark" title="Muted">${icon('bellOff', 'xs')}</span>` : ''}</span><span class="time">${last ? ago(last.t) : ''}</span></span>
       <span class="top"><span class="sub">${last ? `${last.author === 'me' ? 'You' : esc(person(last.author).name)}: ${esc(last.text.slice(0, 48))}` : 'Say hi'}</span>${unread ? `<span class="badge">${unread}</span>` : ''}</span></span></button>`;
   }).join('');
   $('#side').innerHTML = `
@@ -197,14 +198,14 @@ function renderTabs() {
   const nav = $('#tabs');
   if (state.dm) {
     const p = person(D.dms.find((d) => d.id === state.dm).with);
-    nav.innerHTML = `<div class="tabstrip" role="tablist"><button class="tab" role="tab" aria-selected="true">${icon('message')}${esc(p.name)}</button><span class="tab-indicator"></span></div>
+    nav.innerHTML = `<div class="tabstrip" role="tablist"><button class="tab" role="tab" aria-selected="true">${icon('message')}${esc(p.name)}${state.muted.has(state.dm) ? `<span class="muted-mark" title="Muted">${icon('bellOff', 'xs')}</span>` : ''}</button><span class="tab-indicator"></span></div>
       <button class="tab-select" data-act="cmdk" aria-label="Jump to a conversation">${icon('message', 'sm')}<span>${esc(p.name)}</span>${icon('chevronDown', 'sm')}</button>
       <div class="tools"><button class="ibtn keep" data-act="dmCall" aria-label="Call">${icon('phone', 'sm')}</button></div>`;
   } else {
     const room = D.rooms[state.room];
     nav.innerHTML = `<div class="tabstrip" role="tablist" id="tabstrip">${room.channels.map((id) => {
       const ch = D.channels[id]; const count = ch.type === 'voice' ? voiceCount(id) : 0;
-      return `<button class="tab" role="tab" data-act="channel" data-id="${id}" aria-selected="${state.channel === id}">${icon(typeIcon[ch.type])}${esc(ch.name)}${count ? `<span class="count">${icon('user', 'xs')}${count}</span>` : ''}${state.unread[id] ? '<span class="tab-dot" aria-label="unread"></span>' : ''}</button>`;
+      return `<button class="tab" role="tab" data-act="channel" data-id="${id}" aria-selected="${state.channel === id}">${icon(typeIcon[ch.type])}${esc(ch.name)}${count ? `<span class="count">${icon('user', 'xs')}${count}</span>` : ''}${state.muted.has(id) ? `<span class="muted-mark" title="Muted">${icon('bellOff', 'xs')}</span>` : state.unread[id] ? '<span class="tab-dot" aria-label="unread"></span>' : ''}</button>`;
     }).join('')}<span class="tab-indicator" id="indicator"></span></div>
       <button class="tab-select" data-act="channelMenu" aria-haspopup="menu" aria-expanded="false" aria-label="Channel: ${esc(D.channels[state.channel].name)}">${icon(typeIcon[D.channels[state.channel].type], 'sm')}<span>${esc(D.channels[state.channel].name)}</span>${icon('chevronDown', 'sm')}</button>
       <div class="tools"><button class="ibtn" data-act="channelMenu" aria-haspopup="menu" aria-expanded="false" aria-label="All channels">${icon('chevronDown', 'sm')}</button>
@@ -256,14 +257,14 @@ function chatView(key, kind) {
     sub = `${esc(room.name)} / Text channel · ${community().members.length} people${ch.topic ? `<span class="topic"> · ${esc(ch.topic)}</span>` : ''}`;
     place = `Message ${ch.name}`; visibility = `Visible to people with access to ${esc(room.name)}`;
   }
-  const pins = D.pinned[key];
+
   return `<section class="view" aria-label="Conversation">
     ${header(title, sub, `
       <button class="ibtn boxed ${state.searchOpen ? 'on' : ''}" data-act="search" aria-label="Search this conversation" title="Search (Ctrl+F)">${icon('search')}</button>
       <button class="ibtn boxed" data-act="pins" aria-label="Pinned messages">${icon('pin')}</button>
       <button class="ibtn boxed keep" data-act="convMenu" aria-label="More">${icon('more')}</button>`, '<span class="e2e" title="End-to-end encrypted">' + icon('lock') + 'Encrypted</span>')}
     ${state.searchOpen ? `<div class="searchbar">${icon('search', 'sm')}<input id="searchInput" placeholder="Search messages" value="${esc(state.search)}" aria-label="Search messages"><small id="searchCount"></small><button class="ibtn sm" data-act="search" aria-label="Close search">${icon('x', 'sm')}</button></div>` : ''}
-    ${pins && !state.searchOpen ? `<div class="pinbar">${icon('pin', 'sm')}<span>Pinned · 1 of ${pins.length} · <b>${esc(pins[0].text)}</b> by ${esc(person(pins[0].author).name)}</span><button data-act="jumpPin">View</button></div>` : ''}
+    ${state.searchOpen ? '' : pinbarHtml(key)}
     <div class="feed" id="feed" tabindex="-1" aria-live="polite"><div class="feed-inner" id="feedInner">${feedHtml(key)}</div></div>
     <button class="jump" id="jump" data-act="jumpLatest">${icon('arrowDown', 'sm')} New messages</button>
     <div class="typing" id="typing"></div>
@@ -272,10 +273,31 @@ function chatView(key, kind) {
   </section>`;
 }
 
+const pinsFor = (key) => (D.pinned[key] || []).map(findMsg).filter(Boolean);
+const snippet = (m, n = 80) => m.text ? m.text.replace(/```[\s\S]*?```/g, '[code]').replace(/[*`]/g, '').slice(0, n) : m.attachments ? m.attachments[0].name : '';
+function pinbarHtml(key) {
+  const pins = pinsFor(key); if (!pins.length) return '';
+  const m = pins.at(-1);
+  return `<div class="pinbar">${icon('pin', 'sm')}<span>Pinned · ${pins.length === 1 ? '1 of 1' : `latest of ${pins.length}`} · <b>${esc(snippet(m, 60))}</b> by ${esc(person(m.author).name)}</span><button data-act="pins">View</button></div>`;
+}
+function updatePinbar() {
+  const view = $('#main .view'); if (!view || !$('#feed', view) || state.searchOpen) return;
+  const html = pinbarHtml(convKey()); const old = $('.pinbar', view);
+  if (old) { if (html) old.outerHTML = html; else old.remove(); }
+  else if (html) $('.chead', view).insertAdjacentHTML('afterend', html);
+}
+function pinsPopover(anchor) {
+  const key = convKey(); const pins = pinsFor(key).reverse();
+  const el = openPopover(anchor, `<div class="pp-head"><b>Pinned messages</b><span>${pins.length}</span></div>${pins.length ? `<div class="pp-list">${pins.map((m) => `<div class="pp-item">${avatar(m.author, 'sm')}<div class="t"><div><b>${esc(person(m.author).name)}</b><time>${dayLabel(m.t)} · ${clock(m.t)}</time></div><p>${esc(snippet(m, 140))}</p></div>
+      <div class="pp-tools"><button class="ibtn sm" data-act="gotoPin" data-id="${m.id}" aria-label="Jump to message" title="Jump to message">${icon('arrowRight', 'sm')}</button><button class="ibtn sm" data-act="pinMsg" data-id="${m.id}" aria-label="Unpin" title="Unpin">${icon('x', 'sm')}</button></div></div>`).join('')}</div>`
+    : `<div class="pp-empty">${icon('pin')}<b>Nothing pinned yet</b><span>Hover a message, open ⋯ and choose Pin message.</span></div>`}`, { cls: 'pins-pop', align: 'end' });
+  return el;
+}
+
 function composerHtml(place, visibility, compact = false) {
   const reply = state.replyTo && findMsg(state.replyTo);
   return `<div class="composer-wrap">
-    ${reply ? `<div class="replying">${icon('reply', 'sm')}<span>Replying to <b>${esc(person(reply.author).name)}</b></span><button class="ibtn sm" data-act="cancelReply" aria-label="Cancel reply">${icon('x', 'sm')}</button></div>` : ''}
+    ${reply ? `<div class="replying">${icon('reply', 'sm')}<span class="rp">Replying to <b>${esc(person(reply.author).name)}</b><em>${esc(snippet(reply, 90))}</em></span><button class="ibtn sm" data-act="cancelReply" aria-label="Cancel reply">${icon('x', 'sm')}</button></div>` : ''}
     <div class="composer" id="composer">
       ${state.format ? `<div class="formatbar" role="toolbar" aria-label="Formatting">
         <button class="ibtn" data-act="fmt" data-f="bold" aria-label="Bold" title="Bold (Ctrl+B)">${icon('bold', 'sm')}</button>
@@ -347,11 +369,11 @@ function messageHtml(m, cont, list, q = '') {
     ? `<div class="linkcard"><small>krypt.example · Shared document</small><b>Friday co-op — plan</b><p>Goals, roles and streaming settings for Friday night.</p></div>` : '';
   const reactions = m.reactions.length ? `<div class="reactions">${m.reactions.map((r) => `<button class="reaction ${r.users.includes('me') ? 'mine' : ''}" data-act="react" data-id="${m.id}" data-e="${r.e}" title="${esc(r.users.map((u) => person(u).name).join(', '))}">${r.e} ${r.users.length}</button>`).join('')}<button class="reaction add" data-act="reactPick" data-id="${m.id}" aria-label="Add reaction">${icon('smile', 'xs')}</button></div>` : '';
   const editing = state.editing === m.id;
-  return `<article class="msg ${cont ? 'cont' : ''} ${replyTo ? 'has-reply' : ''} ${mentionsMe ? 'mention' : ''}" data-mid="${m.id}" aria-label="Message from ${esc(p.name)}">
+  return `<article class="msg ${cont ? 'cont' : ''} ${replyTo ? 'has-reply' : ''} ${mentionsMe ? 'mention' : ''} ${editing ? 'editing' : ''}" data-mid="${m.id}" aria-label="Message from ${esc(p.name)}">
     ${replyTo ? `<div class="reply-ref" data-act="gotoMsg" data-id="${replyTo.id}">${avatar(replyTo.author, 'xs')}<b>${esc(person(replyTo.author).name)}</b><span>${esc((replyTo.text || '').slice(0, 90))}</span></div>` : ''}
     ${avatar(m.author, 'md', false, `data-act="profile" data-id="${m.author}"`)}
-    ${cont ? `<span class="hovertime">${clock(m.t)}</span>` : `<header><b data-act="profile" data-id="${m.author}">${esc(p.name)}</b><time datetime="${new Date(m.t).toISOString()}">${clock(m.t)}</time></header>`}
-    ${editing ? `<div><textarea class="edit-box" id="editBox" style="width:100%;min-height:60px;padding:10px;border-radius:8px;background:var(--sunken);border:1px solid var(--accent);color:var(--text);font-size:var(--fs-body)">${esc(m.text)}</textarea><div style="display:flex;gap:8px;margin-top:6px;font-size:12px;color:var(--text-3);align-items:center"><button class="btn sm primary" data-act="saveEdit" data-id="${m.id}">Save</button><button class="btn sm ghost" data-act="cancelEdit">Cancel</button> Esc to cancel · Enter to save</div></div>`
+    ${cont ? `<span class="hovertime">${clock(m.t)}</span>` : `<header><b data-act="profile" data-id="${m.author}">${esc(p.name)}</b><time datetime="${new Date(m.t).toISOString()}">${clock(m.t)}</time>${isPinned(m.id) ? `<span class="pinned-mark" title="Pinned">${icon('pin', 'xs')}Pinned</span>` : ''}</header>`}
+    ${editing ? `<div><textarea class="input edit-box" id="editBox" aria-label="Edit message">${esc(m.text)}</textarea><div class="edit-actions"><button class="btn sm primary" data-act="saveEdit" data-id="${m.id}">Save</button><button class="btn sm ghost" data-act="cancelEdit">Cancel</button> Esc to cancel · Enter to save</div></div>`
       : `<div class="text">${formatText(m.text, q)}${m.edited ? ' <span class="edited">(edited)</span>' : ''}</div>`}
     ${attachments}${link}${reactions}
     <div class="msg-tools" role="toolbar" aria-label="Message actions">
@@ -364,6 +386,7 @@ function messageHtml(m, cont, list, q = '') {
   </article>`;
 }
 
+const isPinned = (id) => Object.values(D.pinned).some((l) => l.includes(Number(id)));
 function findMsg(id) {
   id = Number(id);
   for (const list of Object.values(D.messages)) { const m = list.find((x) => x.id === id); if (m) return m; }
@@ -437,7 +460,7 @@ function rerenderComposer() {
 }
 
 function composerKey(e) {
-  const pop = $('.popover.mention-pop');
+  const pop = $('.popover.mention-pop:not(.closing)');
   if (pop) {
     const items = $$('.menu-item', pop); let i = items.findIndex((x) => x.classList.contains('active'));
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); items[i]?.classList.remove('active'); i = (i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length; items[i].classList.add('active'); return; }
@@ -460,7 +483,7 @@ function wrapSel(mark, block = false) {
 }
 function mentionComplete(t) {
   const before = t.value.slice(0, t.selectionStart); const m = before.match(/@(\w*)$/);
-  if (!m) { if ($('.popover.mention-pop')) closePopover(); return; }
+  if (!m) { if ($('.popover.mention-pop:not(.closing)')) closePopover(); return; }
   const q = m[1].toLowerCase();
   const list = Object.values(D.people).filter((p) => p.id !== 'me' && (p.handle.startsWith(q) || p.name.toLowerCase().includes(q))).slice(0, 6);
   if (!list.length) { closePopover(); return; }
@@ -546,14 +569,14 @@ function voiceView() {
     const rs = remoteShare(); if (rs) shares.push({ ...rs, mine: false });
     if (state.voice.sharing) { const s = D.shareSources.find((x) => x.id === state.voice.sharing); shares.push({ who: 'me', img: s.img, name: s.name, mine: true }); }
     const cols = shares.length ? Math.max(2, Math.min(4, Math.ceil(Math.sqrt(people.length + shares.length * 4)))) : Math.min(3, Math.ceil(Math.sqrt(people.length)));
-    body = `<div class="grid" id="grid" style="--cols:${cols};--share-span:${Math.min(2, cols)}">
+    body = `<div class="grid" id="grid" style="--cols:${cols};--share-span:${Math.min(2, cols)};--rows:${people.length + Math.max(0, shares.length - 1)}">
       ${shares.map((s, i) => `<div class="tile share" data-act="shareFull" data-i="${i}" role="button" tabindex="0" aria-label="${esc(person(s.who).name)}’s screen, open full screen">
         <img src="${s.img}" alt="">
         <span class="label"><span class="live-dot"></span>${s.mine ? 'You’re sharing' : esc(person(s.who).name)} · ${esc(s.name)}</span>
         ${state.share.hud ? hudHtml(i) : ''}</div>`).join('')}
       ${people.map((id) => {
         const muted = id === 'me' ? state.voice.muted : id === 'mike';
-        return `<div class="tile" data-tile="${id}"><span class="ring"></span><div class="who">${avatar(id, 'lg')}<b>${esc(person(id).name)}${id === 'me' ? '<span class="you">You</span>' : ''}</b>
+        return `<div class="tile" data-tile="${id}"><div class="who">${avatar(id, 'lg')}<b>${esc(person(id).name)}${id === 'me' ? '<span class="you">You</span>' : ''}</b>
         <span class="state" data-state="${id}">${muted ? icon('micOff', 'xs') + ' Mic muted' : icon('mic', 'xs') + ' Listening'}</span></div></div>`;
       }).join('')}
     </div>`;
@@ -779,7 +802,15 @@ function openPopover(anchor, html, { place = 'below', align = 'start', cls = '',
   if (!keepFocus) el.querySelector('button')?.focus({ preventScroll: true });
   return el;
 }
-function closePopover() { if (!popover) return; popover.anchor.setAttribute?.('aria-expanded', 'false'); popover.el.remove(); popover = null; $$('.msg.menu-open').forEach((m) => m.classList.remove('menu-open')); }
+function closePopover() {
+  if (!popover) return;
+  const { el, anchor } = popover; popover = null;
+  anchor.setAttribute?.('aria-expanded', 'false');
+  // Fade out; ids leave immediately so a popover opening in its place owns them.
+  el.classList.add('closing'); $$('[id]', el).forEach((x) => x.removeAttribute('id'));
+  setTimeout(() => el.remove(), reduceMotion() ? 0 : 120);
+  $$('.msg.menu-open').forEach((m) => m.classList.remove('menu-open'));
+}
 
 function modal(html, { cls = '', label = 'Dialog' } = {}) {
   closeModal();
@@ -792,7 +823,12 @@ function modal(html, { cls = '', label = 'Dialog' } = {}) {
   setTimeout(() => (s.querySelector('[autofocus]') || (cls.includes('settings') ? null : s.querySelector('input:not([readonly])')) || s.querySelector('.modal'))?.focus({ preventScroll: true }), 30);
   return s;
 }
-function closeModal() { const s = $('#scrim'); if (!s) return; s.remove(); micStop(); }
+function closeModal() {
+  const s = $('#scrim'); if (!s) return;
+  s.removeAttribute('id'); s.classList.add('closing'); $$('[id]', s).forEach((x) => x.removeAttribute('id'));
+  setTimeout(() => s.remove(), reduceMotion() ? 0 : 170);
+  micStop();
+}
 
 function toast(title, sub = '', ic = 'info', kind = '') {
   const el = document.createElement('div'); el.className = `toast ${kind}`;
@@ -802,8 +838,8 @@ function toast(title, sub = '', ic = 'info', kind = '') {
 }
 
 const EMOJI = ['👍', '❤️', '😂', '🔥', '🎉', '😮', '😢', '🙏', '👀', '💯', '✨', '🐸', '🍿', '🎮', '☕', '🚀', '😎', '🤝', '🥲', '😅', '🤔', '👏', '💀', '✅'];
-function emojiPicker(anchor, onPick, place = 'above') {
-  const el = openPopover(anchor, `<div class="menu-label">Reactions</div><div class="emoji-grid">${EMOJI.map((e) => `<button data-emo="${e}" aria-label="${e}">${e}</button>`).join('')}</div>`, { place, align: 'end' });
+function emojiPicker(anchor, onPick, place = 'above', align = 'end', label = 'Reactions') {
+  const el = openPopover(anchor, `<div class="menu-label">${label}</div><div class="emoji-grid">${EMOJI.map((e) => `<button data-emo="${e}" aria-label="${e}">${e}</button>`).join('')}</div>`, { place, align, cls: 'emoji-pop' });
   el.addEventListener('click', (e) => { const b = e.target.closest('[data-emo]'); if (b) { onPick(b.dataset.emo); closePopover(); } });
 }
 function react(id, e) {
@@ -816,6 +852,8 @@ function react(id, e) {
   $(`.msg[data-mid="${id}"] .reaction[data-e="${e}"]`)?.classList.add('pop');
 }
 
+const roomMuted = () => D.rooms[state.room].channels.every((c) => state.muted.has(c));
+const roleOf = (id) => D.roles[id] || 'Member';
 const STATUS_LABEL = { online: 'Online', idle: 'Away', dnd: 'Do not disturb', offline: 'Offline' };
 const inCall = (id) => !!state.voice.channel && participants().includes(id);
 const inAnyVoice = (id) => inCall(id) || Object.values(D.voiceOccupants).some((list) => list.includes(id));
@@ -831,9 +869,10 @@ function profileCard(anchor, id) {
   const p = person(id);
   const status = id === 'me' ? state.status : p.status;
   const where = inAnyVoice(id) ? '<span class="live">In voice</span>' : STATUS_LABEL[status] || status;
-  const el = openPopover(anchor, `<div class="banner" style="--h:${p.hue}"></div><div class="pc-body">${avatar(id, 'lg', true)}<h3>${esc(p.name)}</h3><div class="pc-sub">@${p.handle} · ${where} · Member</div><p>${esc(p.bio || '')}</p>
+  const el = openPopover(anchor, `<div class="banner" style="--h:${p.hue}"></div><div class="pc-body">${avatar(id, 'lg', true)}<h3>${esc(p.name)}</h3><div class="pc-sub">@${p.handle} · ${where} · ${esc(roleOf(id))}</div><p>${esc(p.bio || '')}</p>
     ${id === 'me' ? `<div class="row-actions"><button class="btn sm" data-act="settings">${icon('settings', 'sm')}Edit profile</button></div>` : `<div class="row-actions"><button class="btn sm primary" data-act="openDm" data-id="${id}">${icon('message', 'sm')}Message</button><button class="btn sm" data-act="dmCall" data-id="${id}">${icon('phone', 'sm')}Call</button></div>
-    <div class="row-actions"><button class="btn sm ghost" data-act="copyName" data-id="${id}">${icon('copy', 'sm')}Copy name</button></div>`}
+    <div class="row-actions"><button class="btn sm ghost" data-act="copyName" data-id="${id}">${icon('copy', 'sm')}Copy name</button></div>
+    <div class="pc-manage"><span class="menu-label">Manage member</span><button class="menu-item" data-act="communitySettings" data-page="members" data-focus="${id}">${icon('shield')}Community roles<span class="hint">${esc(roleOf(id))}</span></button></div>`}
     ${id !== 'me' && inCall(id) ? volumeHtml(id) : ''}</div>`, { cls: 'profile-card' });
   el.style.setProperty('--h', p.hue);
   wireVolume(el, id);
@@ -873,7 +912,7 @@ function roomSettingsModal() {
       <div class="field" style="border-top:0;padding-top:0"><label for="roomName">Name<small>Shown to everyone in ${esc(community().name)}</small></label><input class="input" id="roomName" value="${esc(room.name)}" autocomplete="off"></div>
       <div class="field" style="align-items:start"><div class="label">Channels<small>${room.channels.length} in this room</small></div><div style="display:grid;gap:4px">${room.channels.map((id) => `<div class="menu-item" style="cursor:default">${icon(typeIcon[D.channels[id].type])}${esc(D.channels[id].name)}<span class="hint">${D.channels[id].type}</span></div>`).join('')}
         <button class="menu-item" data-act="newChannel">${icon('plus')}Add a channel</button></div></div>
-      <div class="field"><div class="label">Notifications<small>For every channel in this room</small></div>${toggle('room_notify', true, 'Room notifications')}</div>
+      <div class="field"><div class="label">Notifications<small>For every channel in this room</small></div>${toggle('room_notify', !roomMuted(), 'Room notifications')}</div>
     </div>
     <footer><button class="btn ghost" data-act="closeModal">Cancel</button><button class="btn primary" data-act="saveRoom">Save</button></footer>`, { label: 'Room settings' });
 }
@@ -1066,6 +1105,138 @@ function inviteModal() {
     <div class="field" style="margin-top:14px"><div class="label">Expires</div>${seg('expire', '7d', [['1d', '1 day'], ['7d', '7 days'], ['never', 'Never']])}</div>
     <p style="margin:8px 0 0;font-size:var(--fs-caption);color:var(--text-3)">See what they’ll see: <a href="join.html">open the invite page</a></p></div>`, { label: 'Invite people' });
 }
+// ------------------------------------------------------------------ community settings
+const CS_PAGES = [['overview', 'Overview', 'globe'], ['members', 'Members', 'users'], ['roles', 'Roles', 'shield'], ['invites', 'Invites', 'link'], ['danger', 'Leave or delete', 'alert']];
+const PERMS = [['rooms', 'Create and edit rooms'], ['invite', 'Invite people'], ['pin', 'Pin messages'], ['share', 'Share their screen'], ['remove', 'Remove members']];
+const csState = { page: 'overview', focus: null, q: '' };
+function communitySettings(page, focus) {
+  closePopover();
+  csState.page = page || 'overview'; csState.focus = focus || null; csState.q = '';
+  const c = community();
+  modal(`<header><span class="cs-tile">${communityTile(c.id + 'cs', c.hue)}</span><h2>${esc(c.name)} <small>Community settings</small></h2><button class="ibtn" data-act="closeModal" aria-label="Close">${icon('x')}</button></header>
+    <div class="split"><nav aria-label="Community settings sections">${CS_PAGES.map(([id, name, ic]) => `<button data-act="csPage" data-id="${id}" aria-current="${csState.page === id}" class="${id === 'danger' ? 'danger' : ''}">${icon(ic)}${name}</button>`).join('')}</nav>
+    <div class="pane" id="csPane"></div></div>`, { cls: 'settings community-settings', label: 'Community settings' });
+  renderCsPane();
+}
+function renderCsPane() {
+  const pane = $('#csPane'); if (!pane) return;
+  $$('.community-settings nav button').forEach((b) => b.setAttribute('aria-current', b.dataset.id === csState.page));
+  const c = community();
+  const members = c.members;
+  switch (csState.page) {
+    case 'overview': pane.innerHTML = `<h3>Overview</h3><p class="lede">How ${esc(c.name)} appears to members and to people you invite.</p>
+      <div class="field"><label for="csName">Name<small>Up to 32 characters</small></label><input class="input" id="csName" maxlength="32" value="${esc(c.name)}" autocomplete="off"></div>
+      <div class="field" style="align-items:start"><div class="label">Icon<small>A landscape tinted with your colour</small></div><div class="cs-icon"><span class="cs-tile lg" id="csTilePreview">${communityTile(c.id + 'cs', c.hue)}</span>
+        <div class="slider"><input type="range" id="csHue" min="0" max="359" value="${c.hue}" aria-label="Icon colour" style="--p:${(c.hue / 359) * 100}%;background:linear-gradient(90deg,hsl(0 60% 55%),hsl(60 60% 55%),hsl(120 60% 55%),hsl(180 60% 55%),hsl(240 60% 55%),hsl(300 60% 55%),hsl(359 60% 55%))"></div></div></div>
+      <div class="field" style="align-items:start"><label for="csAbout">Description<small>Shown on the invite page</small></label><textarea class="input" id="csAbout" rows="3" maxlength="200" placeholder="What’s this community for?">${esc(c.about || '')}</textarea></div>
+      <div class="field"><div class="label">Members<small>People in ${esc(c.name)}</small></div><div class="cs-stat"><b>${members.length}</b> members · <b>${c.rooms.length}</b> rooms · <b>${members.filter((m) => m !== 'me' && person(m).status !== 'offline').length}</b> online now</div></div>`;
+      wireOverview(); break;
+    case 'members': {
+      const q = csState.q.toLowerCase();
+      const list = members.filter((m) => !q || person(m).name.toLowerCase().includes(q) || person(m).handle.includes(q));
+      pane.innerHTML = `<h3>Members</h3><p class="lede">Roles decide what each person can do. Only owners can change another owner.</p>
+        <input class="input" id="csFind" placeholder="Find a member" value="${esc(csState.q)}" autocomplete="off" aria-label="Find a member">
+        <div class="cs-members">${list.map((m) => `<div class="cs-member ${csState.focus === m ? 'focus' : ''}" data-member="${m}">${avatar(m, 'sm', true, 'style="--dot-ring: var(--bg)"')}<div class="t"><b>${esc(person(m).name)}${m === 'me' ? ' <span class="you">You</span>' : ''}</b><small>@${person(m).handle} · ${STATUS_LABEL[m === 'me' ? state.status : person(m).status]}</small></div>
+          ${roleOf(m) === 'Owner' ? `<span class="role-chip owner">${icon('crown', 'xs')}Owner</span>` : `<select class="select sm" data-role="${m}" aria-label="Role for ${esc(person(m).name)}">${['Admin', 'Member', 'Guest'].map((r) => `<option ${roleOf(m) === r ? 'selected' : ''}>${r}</option>`).join('')}</select>`}</div>`).join('') || `<div class="mp-empty">No one called “${esc(csState.q)}”</div>`}</div>`;
+      const f = $('#csFind', pane);
+      f.addEventListener('input', () => { csState.q = f.value; csState.focus = null; renderCsPane(); const n = $('#csFind'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); });
+      $$('select[data-role]', pane).forEach((sel) => sel.addEventListener('change', () => { D.roles[sel.dataset.role] = sel.value; toast('Role updated', `${person(sel.dataset.role).name} is now ${sel.value === 'Admin' ? 'an' : 'a'} ${sel.value}`, 'shield', 'ok'); }));
+      if (csState.focus) setTimeout(() => $(`.cs-member[data-member="${csState.focus}"]`, pane)?.scrollIntoView({ block: 'center' }), 60);
+      break;
+    }
+    case 'roles': pane.innerHTML = `<h3>Roles</h3><p class="lede">What each role can do in ${esc(c.name)}. Owners can always do everything.</p>
+      <div class="role-grid"><div class="rg-head"><span></span>${['Admin', 'Member', 'Guest'].map((r) => `<b>${r}<small>${members.filter((m) => roleOf(m) === r).length}</small></b>`).join('')}</div>
+      ${PERMS.map(([k, label]) => `<div class="rg-row"><span>${label}</span>${['Admin', 'Member', 'Guest'].map((r) => `<span>${toggle(`perm:${r}:${k}`, D.rolePerms[r].includes(k), `${r}: ${label}`)}</span>`).join('')}</div>`).join('')}</div>`; break;
+    case 'invites': {
+      const inv = D.invites.filter((i) => i.community === c.id);
+      pane.innerHTML = `<h3>Invites</h3><p class="lede">Anyone with an active link can join. Revoking a link stops it working immediately.</p>
+        <div class="cs-invites">${inv.map((i) => `<div class="cs-invite"><span class="ico">${icon('link', 'sm')}</span><div class="t"><code>krypt.example/join#${esc(i.id)}</code><small>Made by ${esc(person(i.by).name)} · ${i.uses} ${i.uses === 1 ? 'use' : 'uses'} · expires ${esc(i.expires)}</small></div>
+          <button class="btn sm" data-act="copyInvite" data-id="${esc(i.id)}">${icon('copy', 'sm')}Copy</button><button class="btn sm danger" data-act="revokeInvite" data-id="${esc(i.id)}">Revoke</button></div>`).join('') || `<div class="cs-none">${icon('link')}<b>No active invites</b><span>Make one to bring people in.</span></div>`}</div>
+        <div style="margin-top:14px;display:flex;gap:10px"><button class="btn primary" data-act="invite">${icon('plus', 'sm')}New invite link</button></div>`; break;
+    }
+    case 'danger': {
+      const owner = roleOf('me') === 'Owner';
+      pane.innerHTML = `<h3>Leave or delete</h3><p class="lede">These can’t be undone from here.</p>
+        <div class="danger-card"><div><b>Leave ${esc(c.name)}</b><small>${owner ? 'You own this community. Make someone else an owner before you leave.' : 'You’ll need a new invite to come back.'}</small></div><button class="btn danger" data-act="leaveCommunity" ${owner ? 'disabled' : ''}>Leave</button></div>
+        <div class="danger-card"><div><b>Delete ${esc(c.name)}</b><small>Removes every room, message and file for everyone. Type <b>${esc(c.name)}</b> to confirm.</small><input class="input sm" id="csDeleteName" placeholder="${esc(c.name)}" autocomplete="off" aria-label="Type the community name to confirm" style="margin-top:10px;max-width:260px"></div><button class="btn danger" id="csDelete" data-act="deleteCommunity" disabled>Delete</button></div>`;
+      const inp = $('#csDeleteName', pane);
+      inp.addEventListener('input', () => { $('#csDelete').disabled = inp.value.trim() !== c.name; });
+      break;
+    }
+  }
+  pane.scrollTop = 0;
+}
+function wireOverview() {
+  const c = community();
+  $('#csName').addEventListener('input', (e) => { const v = e.target.value.trim(); if (!v) return; c.name = v; renderCommunity(); $('.community-settings > header h2').firstChild.textContent = v + ' '; });
+  $('#csName').addEventListener('change', () => toast('Name saved', c.name, 'checkCircle', 'ok'));
+  $('#csAbout').addEventListener('input', (e) => { c.about = e.target.value; });
+  const hue = $('#csHue');
+  hue.addEventListener('input', () => {
+    c.hue = Number(hue.value); hue.style.setProperty('--p', `${(c.hue / 359) * 100}%`);
+    $('#csTilePreview').innerHTML = communityTile(c.id + 'cs', c.hue); $('.community-settings .cs-tile').innerHTML = communityTile(c.id + 'cs', c.hue);
+    renderCommunity();
+  });
+}
+
+function newRoomModal() {
+  closePopover();
+  const templates = [['hangout', 'Hangout', 'Chat and a voice channel', ['text', 'voice']], ['plan', 'Planning', 'Chat, calendar and tasks', ['text', 'calendar', 'tasks']], ['blank', 'Just chat', 'One text channel', ['text']]];
+  modal(`<header>${icon('plus')}<h2>Create a room</h2><button class="ibtn" data-act="closeModal" aria-label="Close">${icon('x')}</button></header>
+    <div class="mbody"><label class="stack-label" for="roomNew">Room name</label><input class="input" id="roomNew" placeholder="e.g. Movie night" maxlength="40" autocomplete="off">
+    <div class="stack-label" style="margin-top:16px">Start with</div><div class="templates">${templates.map(([id, n, d, chs], i) => `<button class="pal tpl" data-tpl="${id}" aria-pressed="${i === 0}"><span class="tpl-icons">${chs.map((t) => icon(typeIcon[t], 'sm')).join('')}</span><b>${n}</b><small>${d}</small></button>`).join('')}</div></div>
+    <footer><button class="btn ghost" data-act="closeModal">Cancel</button><button class="btn primary" id="mkRoom">Create room</button></footer>`, { label: 'Create a room' });
+  let tpl = 'hangout';
+  const s = $('#scrim');
+  const create = () => {
+    const input = $('#roomNew'); const name = input.value.trim();
+    if (!name) { input.focus(); input.classList.add('invalid'); input.placeholder = 'Give the room a name'; return; }
+    const id = 'r' + Date.now(); const chans = templates.find((t) => t[0] === tpl)[3];
+    D.rooms[id] = { name, owner: 'me', channels: [] };
+    chans.forEach((type, i) => { const ch = `${id}-${i}`; D.channels[ch] = { type, name: type === 'text' ? 'general' : type === 'voice' ? 'Voice' : type === 'calendar' ? 'Calendar' : 'Tasks', topic: '' }; D.messages[ch] = []; if (type === 'voice') D.voiceOccupants[ch] = []; D.rooms[id].channels.push(ch); });
+    community().rooms.push(id); closeModal(); go(state.community, id, D.rooms[id].channels[0]); toast('Room created', name, 'plus', 'ok');
+  };
+  s.addEventListener('click', (e) => { const b = e.target.closest('[data-tpl]'); if (b) { tpl = b.dataset.tpl; $$('[data-tpl]', s).forEach((x) => x.setAttribute('aria-pressed', x === b)); } if (e.target.closest('#mkRoom')) create(); });
+  $('#roomNew').addEventListener('keydown', (e) => { if (e.key === 'Enter') create(); });
+  $('#roomNew').addEventListener('input', (e) => e.target.classList.remove('invalid'));
+}
+
+function joinCreateModal(mode = 'create') {
+  closePopover();
+  const hues = [96, 150, 190, 215, 265, 320, 12, 36];
+  let hue = hues[0];
+  modal(`<header>${icon('users')}<h2>Join or create a community</h2><button class="ibtn" data-act="closeModal" aria-label="Close">${icon('x')}</button></header>
+    <div class="mbody"><div class="seg jc-seg" role="tablist"><button data-jc="create" aria-pressed="${mode === 'create'}">${icon('plus', 'sm')}Create</button><button data-jc="join" aria-pressed="${mode === 'join'}">${icon('link', 'sm')}Join with a link</button></div>
+    <div class="jc-pane" data-pane="create" ${mode === 'create' ? '' : 'hidden'}><div class="jc-preview"><span class="cs-tile lg" id="jcTile">${communityTile('new-community', hue)}</span><div><label class="stack-label" for="jcName">Community name</label><input class="input" id="jcName" placeholder="e.g. Saturday league" maxlength="32" autocomplete="off"></div></div>
+      <div class="stack-label" style="margin-top:14px">Colour</div><div class="swatches">${hues.map((h, i) => `<button class="swatch" data-hue="${h}" aria-pressed="${i === 0}" aria-label="Colour ${i + 1}" style="--sw:hsl(${h} 55% 50%)"></button>`).join('')}</div></div>
+    <div class="jc-pane" data-pane="join" ${mode === 'join' ? '' : 'hidden'}><label class="stack-label" for="jcLink">Invite link</label><input class="input" id="jcLink" placeholder="krypt.example/join#…" autocomplete="off"><p class="jc-note" id="jcNote">Paste the link someone sent you. <a href="join.html#${community().id}-preview">See what an invite looks like</a></p></div></div>
+    <footer><button class="btn ghost" data-act="closeModal">Cancel</button><button class="btn primary" id="jcGo">${mode === 'create' ? 'Create community' : 'Join'}</button></footer>`, { label: 'Join or create a community' });
+  const s = $('#scrim'); let current = mode;
+  const setMode = (m) => { current = m; $$('[data-jc]', s).forEach((b) => b.setAttribute('aria-pressed', b.dataset.jc === m)); $$('.jc-pane', s).forEach((p) => { p.hidden = p.dataset.pane !== m; }); $('#jcGo').textContent = m === 'create' ? 'Create community' : 'Join'; $(m === 'create' ? '#jcName' : '#jcLink').focus(); };
+  const go_ = () => {
+    if (current === 'create') {
+      const input = $('#jcName'); const name = input.value.trim();
+      if (!name) { input.classList.add('invalid'); input.focus(); return; }
+      const id = 'c' + Date.now(), room = id + '-room', ch = id + '-general';
+      D.rooms[room] = { name: 'Lobby', owner: 'me', channels: [ch] }; D.channels[ch] = { type: 'text', name: 'general', topic: `Welcome to ${name}` }; D.messages[ch] = [];
+      D.communities.push({ id, name, hue, members: ['me'], rooms: [room] }); D.roles.me = 'Owner';
+      closeModal(); go(id, room, ch); toast('Community created', `Invite people from the ${name} menu`, 'checkCircle', 'ok');
+    } else {
+      const v = $('#jcLink').value.trim(); const m = v.match(/join#([a-z0-9]+)-/i); const c = m && D.communities.find((x) => x.id === m[1]);
+      const note = $('#jcNote');
+      if (!c) { $('#jcLink').classList.add('invalid'); note.classList.add('error'); note.textContent = 'That isn’t a Krypt invite link. It should look like krypt.example/join#name-code.'; return; }
+      closeModal(); go(c.id, c.rooms[0]); toast(`You’re already in ${c.name}`, 'Took you there instead', 'users');
+    }
+  };
+  s.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-jc]'); if (t) setMode(t.dataset.jc);
+    const sw = e.target.closest('[data-hue]'); if (sw) { hue = Number(sw.dataset.hue); $$('[data-hue]', s).forEach((x) => x.setAttribute('aria-pressed', x === sw)); $('#jcTile').innerHTML = communityTile('new-community', hue); }
+    if (e.target.closest('#jcGo')) go_();
+  });
+  $$('#jcName, #jcLink', s).forEach((i) => { i.addEventListener('keydown', (e) => { if (e.key === 'Enter') go_(); }); i.addEventListener('input', () => { i.classList.remove('invalid'); $('#jcNote')?.classList.remove('error'); }); });
+  setTimeout(() => $(mode === 'create' ? '#jcName' : '#jcLink')?.focus(), 40);
+}
+
 const SHORTCUTS = [
   ['Ctrl K', 'Search and jump anywhere'], ['Ctrl ,', 'Open settings'], ['Ctrl Shift M', 'Mute or unmute'], ['Ctrl Shift D', 'Deafen'],
   ['Alt ↑', 'Previous channel'], ['Alt ↓', 'Next channel'], ['Ctrl F', 'Search this conversation'], ['/', 'Focus the message box'],
@@ -1077,8 +1248,15 @@ function shortcutSheet() {
   $('#scrim .modal').style.setProperty('--w', '720px');
 }
 function lightbox(html, cls = '') {
+  closeLightbox();
   const el = document.createElement('div'); el.className = `lightbox ${cls}`; el.innerHTML = html; el.id = 'lightbox';
-  el.addEventListener('click', () => el.remove()); document.body.append(el);
+  el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Image viewer');
+  el.addEventListener('click', closeLightbox); document.body.append(el);
+}
+function closeLightbox() {
+  const el = $('#lightbox'); if (!el) return;
+  el.removeAttribute('id'); el.classList.add('closing');
+  setTimeout(() => el.remove(), reduceMotion() ? 0 : 180);
 }
 
 // ------------------------------------------------------------------ navigation
@@ -1117,11 +1295,13 @@ const act = {
   channel(el) { go(state.community, state.room, el.dataset.id); },
   communityMenu(el) {
     openPopover(el, `<div class="menu-label">Communities</div>${D.communities.map((c) => `<button class="menu-item ${c.id === state.community ? 'checked' : ''}" data-act="switchCommunity" data-id="${c.id}"><span style="width:28px;height:28px;border-radius:8px;overflow:hidden;display:inline-block">${communityTile(c.id + 'm', c.hue)}</span>${esc(c.name)}<span class="hint">${c.members.length} members</span></button>`).join('')}
-      <div class="menu-sep"></div><button class="menu-item" data-act="invite">${icon('link')}Invite people</button><button class="menu-item" data-act="joinCommunity">${icon('plus')}Join or create a community</button><button class="menu-item" data-act="settings">${icon('settings')}Community settings</button>`, { cls: '' }).style.minWidth = el.offsetWidth - 16 + 'px';
+      <div class="menu-sep"></div><button class="menu-item" data-act="invite">${icon('link')}Invite people</button><button class="menu-item" data-act="joinCommunity">${icon('plus')}Join or create a community</button><button class="menu-item" data-act="communitySettings">${icon('settings')}Community settings</button>`, { cls: '' }).style.minWidth = el.offsetWidth - 16 + 'px';
   },
   switchCommunity(el) { closePopover(); const c = D.communities.find((x) => x.id === el.dataset.id); go(c.id, c.rooms[0]); toast(`Switched to ${c.name}`, '', 'users'); },
   invite() { closePopover(); inviteModal(); },
-  joinCommunity() { closePopover(); location.href = 'join.html'; },
+  joinCommunity() { joinCreateModal(); },
+  communitySettings(el) { communitySettings(el?.dataset?.page, el?.dataset?.focus); },
+  csPage(el) { csState.page = el.dataset.id; renderCsPane(); },
   channelMenu(el) {
     openPopover(el, `<div class="menu-label">${esc(D.rooms[state.room].name)}</div>${D.rooms[state.room].channels.map((id) => `<button class="menu-item ${id === state.channel ? 'checked' : ''}" data-act="channel" data-id="${id}">${icon(typeIcon[D.channels[id].type])}${esc(D.channels[id].name)}</button>`).join('')}<div class="menu-sep"></div><button class="menu-item" data-act="newChannel">${icon('plus')}Add a channel</button>`, { align: 'end' });
   },
@@ -1143,7 +1323,7 @@ const act = {
     });
     setTimeout(() => $('#chName')?.focus(), 40);
   },
-  newRoom() { const id = 'r' + Date.now(); D.rooms[id] = { name: 'New room', owner: 'me', channels: [] }; const ch = 'c' + Date.now(); D.channels[ch] = { type: 'text', name: 'general', topic: '' }; D.messages[ch] = []; D.rooms[id].channels.push(ch); community().rooms.push(id); go(state.community, id, ch); toast('Room created', 'Invite people from the community menu', 'plus', 'ok'); },
+  newRoom() { newRoomModal(); },
   newDm() { openPalette(''); },
   cmdk() { openPalette(); },
   cmdkVoice() { openPalette('voice'); },
@@ -1168,17 +1348,22 @@ const act = {
   localMute(el) { const id = el.dataset.id, s = state.voice.localMute; if (s.has(id)) s.delete(id); else s.add(id); refreshVolume(id); toast(s.has(id) ? `${person(id).name} muted for you` : `${person(id).name} unmuted`, 'Only changes what you hear', s.has(id) ? 'micOff' : 'volume'); },
   resetVolume(el) { const id = el.dataset.id; delete state.voice.volume[id]; state.voice.localMute.delete(id); refreshVolume(id); },
   roomMenu(el) {
-    openPopover(el, `<div class="menu-label">${esc(D.rooms[state.room].name)}</div><button class="menu-item" data-act="roomSettings">${icon('settings')}Room settings</button><button class="menu-item" data-act="newChannel">${icon('plus')}Add a channel</button><button class="menu-item" data-act="invite">${icon('users')}Invite people</button><div class="menu-sep"></div><button class="menu-item" data-act="markRead">${icon('check')}Mark all as read</button><button class="menu-item" data-act="toastMute">${icon('bell')}Mute room</button><button class="menu-item" data-act="toastCopy">${icon('link')}Copy room link</button>`, { align: 'end' });
+    openPopover(el, `<div class="menu-label">${esc(D.rooms[state.room].name)}</div><button class="menu-item" data-act="roomSettings">${icon('settings')}Room settings</button><button class="menu-item" data-act="newChannel">${icon('plus')}Add a channel</button><button class="menu-item" data-act="invite">${icon('users')}Invite people</button><div class="menu-sep"></div><button class="menu-item" data-act="markRead">${icon('check')}Mark all as read</button><button class="menu-item" data-act="muteRoom">${icon(roomMuted() ? 'bell' : 'bellOff')}${roomMuted() ? 'Unmute room' : 'Mute room'}</button><button class="menu-item" data-act="toastCopy">${icon('link')}Copy room link</button>`, { align: 'end' });
   },
   roomSettings() { roomSettingsModal(); },
+  copyInvite(el) { navigator.clipboard?.writeText('https://krypt.example/join#' + el.dataset.id).catch(() => {}); toast('Invite link copied', 'Paste it anywhere', 'link', 'ok'); },
+  revokeInvite(el) { const i = D.invites.findIndex((x) => x.id === el.dataset.id); if (i >= 0) D.invites.splice(i, 1); renderCsPane(); toast('Invite revoked', 'That link no longer works', 'link'); },
+  leaveCommunity() { toast('Make someone else an owner first', 'Then you can leave', 'info', 'warn'); },
+  deleteCommunity() { const c = community(); if (D.communities.length < 2) { toast('Can’t delete your only community', 'Create or join another one first', 'info', 'warn'); return; } D.communities.splice(D.communities.indexOf(c), 1); closeModal(); const n = D.communities[0]; go(n.id, n.rooms[0]); renderTitle(); renderCommunity(); toast(`${c.name} deleted`, 'Removed for everyone', 'trash'); },
   saveRoom() { const name = $('#roomName')?.value.trim(); if (name) D.rooms[state.room].name = name; closeModal(); renderSide(); renderTabs(); renderMain(); toast('Room saved', name || '', 'checkCircle', 'ok'); },
+  muteRoom() { closePopover(); const on = !roomMuted(); D.rooms[state.room].channels.forEach((c) => on ? state.muted.add(c) : state.muted.delete(c)); renderTabs(); renderSide(); toast(on ? 'Room muted' : 'Room unmuted', D.rooms[state.room].name, on ? 'bellOff' : 'bell'); },
   markRead() { closePopover(); for (const c of D.rooms[state.room].channels) delete state.unread[c]; renderSide(); renderTabs(); toast('All caught up', D.rooms[state.room].name, 'check', 'ok'); },
   dmCall(el) { closePopover(); const who = el.dataset.id || D.dms.find((d) => d.id === state.dm)?.with; toast(`Calling ${person(who).name}…`, 'Ringing on their devices', 'phone'); },
   // chat
   send() { send(); },
   attach() { $('#fileInput')?.click(); },
   unpend(el) { state.pending.splice(Number(el.dataset.i), 1); rerenderComposer(); },
-  emoji(el) { emojiPicker(el, (e) => { const t = $('#input'); t.setRangeText(e, t.selectionStart, t.selectionEnd, 'end'); t.focus(); updateSend(); }); },
+  emoji(el) { if (popover?.anchor === el) { closePopover(); return; } emojiPicker(el, (e) => { const t = $('#input'); t.setRangeText(e, t.selectionStart, t.selectionEnd, 'end'); t.focus(); updateSend(); }, 'above', 'start', 'Emoji'); },
   format() { state.format = !state.format; rerenderComposer(); },
   fmt(el) { const f = el.dataset.f; if (f === 'bold') wrapSel('**'); else if (f === 'italic') wrapSel('*'); else if (f === 'code') wrapSel('`'); else if (f === 'block') wrapSel('', true); else { const t = $('#input'); t.setRangeText('> ', t.selectionStart, t.selectionStart, 'end'); t.focus(); } },
   react(el) { react(el.dataset.id, el.dataset.e); },
@@ -1190,22 +1375,40 @@ const act = {
   cancelEdit() { state.editing = null; refreshFeed(false); },
   msgMenu(el) {
     const m = findMsg(el.dataset.id); el.closest('.msg').classList.add('menu-open');
-    openPopover(el, `<button class="menu-item" data-act="reply" data-id="${m.id}">${icon('reply')}Reply</button><button class="menu-item" data-act="copyText" data-id="${m.id}">${icon('copy')}Copy text</button><button class="menu-item" data-act="pinMsg" data-id="${m.id}">${icon('pin')}Pin message</button>
+    openPopover(el, `<button class="menu-item" data-act="reply" data-id="${m.id}">${icon('reply')}Reply</button><button class="menu-item" data-act="copyText" data-id="${m.id}">${icon('copy')}Copy text</button><button class="menu-item" data-act="pinMsg" data-id="${m.id}">${icon('pin')}${isPinned(m.id) ? 'Unpin message' : 'Pin message'}</button>
       ${m.author === 'me' ? `<button class="menu-item" data-act="edit" data-id="${m.id}">${icon('edit')}Edit</button><div class="menu-sep"></div><button class="menu-item danger" data-act="deleteMsg" data-id="${m.id}">${icon('trash')}Delete</button>` : `<div class="menu-sep"></div><button class="menu-item" data-act="profile" data-id="${m.author}">${icon('user')}View ${esc(person(m.author).name)}’s profile</button>`}`, { align: 'end' });
   },
   copyText(el) { closePopover(); navigator.clipboard?.writeText(findMsg(el.dataset.id).text).catch(() => {}); toast('Copied', '', 'copy', 'ok'); },
-  pinMsg() { closePopover(); toast('Pinned', 'Everyone in the room can see it', 'pin', 'ok'); },
+  pinMsg(el) {
+    const id = Number(el.dataset.id); const key = convKey(); const list = (D.pinned[key] ||= []);
+    const fromList = !!el.closest('.pins-pop'); const anchor = popover?.anchor;
+    const was = list.includes(id);
+    D.pinned[key] = was ? list.filter((x) => x !== id) : [...list, id];
+    closePopover(); refreshFeed(false); updatePinbar();
+    if (fromList && anchor?.isConnected && D.pinned[key].length) pinsPopover(anchor);
+    toast(was ? 'Unpinned' : 'Pinned', was ? 'Removed from this conversation’s pins' : 'Everyone here can find it under Pinned', 'pin', 'ok');
+  },
+  gotoPin(el) { closePopover(); act.gotoMsg(el); },
   deleteMsg(el) { closePopover(); const key = convKey(); D.messages[key] = D.messages[key].filter((m) => m.id !== Number(el.dataset.id)); refreshFeed(false); renderSide(); toast('Message deleted', 'Removed from every device', 'trash'); },
   gotoMsg(el) { const t = $(`.msg[data-mid="${el.dataset.id}"]`); if (t) { t.scrollIntoView({ block: 'center', behavior: 'smooth' }); t.classList.remove('flash'); void t.offsetWidth; t.classList.add('flash'); } },
-  jumpPin() { const m = (D.messages.general || []).find((x) => x.attachments); if (m) act.gotoMsg({ dataset: { id: m.id } }); },
-  pins(el) { act.jumpPin(el); },
+  pins(el) {
+    const anchor = el.closest('.popover') ? popover.anchor : el;
+    if (popover?.anchor === anchor && popover.el.classList.contains('pins-pop')) { closePopover(); return; }
+    pinsPopover(anchor);
+  },
   jumpLatest() { scrollFeed(false); $('#jump').classList.remove('show'); },
   expandGroup(el) { expandedGroups.add(Number(el.dataset.id)); refreshFeed(false); },
   search() { state.searchOpen = !state.searchOpen; if (!state.searchOpen) state.search = ''; renderMain(); },
   convMenu(el) {
-    openPopover(el, `<button class="menu-item" data-act="search">${icon('search')}Search<span class="hint">Ctrl F</span></button><button class="menu-item" data-act="toastMute">${icon('bell')}Mute notifications</button><button class="menu-item" data-act="toastCopy">${icon('link')}Copy link</button><button class="menu-item" data-act="invite">${icon('users')}Invite people</button>`, { align: 'end' });
+    const muted = state.muted.has(convKey());
+    openPopover(el, `<button class="menu-item" data-act="search">${icon('search')}Search<span class="hint">Ctrl F</span></button><button class="menu-item" data-act="pins">${icon('pin')}Pinned messages<span class="hint">${pinsFor(convKey()).length || ''}</span></button><button class="menu-item" data-act="toastMute">${icon(muted ? 'bell' : 'bellOff')}${muted ? 'Unmute notifications' : 'Mute notifications'}</button><button class="menu-item" data-act="toastCopy">${icon('link')}Copy link</button><button class="menu-item" data-act="invite">${icon('users')}Invite people</button>`, { align: 'end' });
   },
-  toastMute() { closePopover(); toast('Notifications muted', 'For this conversation, until you turn them back on', 'bell'); },
+  toastMute() {
+    closePopover(); const k = convKey(); const on = !state.muted.has(k);
+    if (on) state.muted.add(k); else state.muted.delete(k);
+    renderTabs(); renderSide();
+    toast(on ? 'Notifications muted' : 'Notifications on', on ? 'You won’t be pinged here until you unmute' : 'You’ll be notified about new messages here', on ? 'bellOff' : 'bell');
+  },
   toastCopy() { closePopover(); toast('Link copied', 'Paste it anywhere', 'link', 'ok'); },
   lightbox(el) { const m = findMsg(el.dataset.id); const a = m.attachments[0]; lightbox(a.url ? `<img src="${a.url}" alt="">` : `<div style="width:min(900px,90vw);aspect-ratio:4/3">${a.art === 'poster' ? poster() : desk()}</div><span class="cap">${esc(a.name)} · ${esc(person(m.author).name)}</span>`); },
   // voice
@@ -1263,6 +1466,8 @@ const act = {
     const on = el.getAttribute('aria-checked') !== 'true'; el.setAttribute('aria-checked', on);
     const k = el.dataset.k;
     if (k === 'hud') { state.share.hud = on; store.set('share', state.share); }
+    if (k === 'room_notify') D.rooms[state.room].channels.forEach((c) => on ? state.muted.delete(c) : state.muted.add(c));
+    if (k.startsWith('perm:')) { const [, r, perm] = k.split(':'); const l = D.rolePerms[r]; if (on && !l.includes(perm)) l.push(perm); if (!on) D.rolePerms[r] = l.filter((x) => x !== perm); }
     if (k.startsWith('n_')) { state.notify[k.slice(2)] = on; store.set('notify', state.notify); if (k === 'n_desktop' && on && 'Notification' in window) Notification.requestPermission(); }
   },
   revoke(el) { const d = D.devices.find((x) => x.id === el.dataset.id); D.devices.splice(D.devices.indexOf(d), 1); rerenderPane(); toast(`${d.name} removed`, 'Its key no longer opens your account', 'shield', 'ok'); },
@@ -1303,7 +1508,7 @@ document.addEventListener('keydown', (e) => {
   if (mod && e.key.toLowerCase() === 'f' && (state.dm || D.channels[state.channel]?.type === 'text')) { e.preventDefault(); if (!state.searchOpen) act.search(); else $('#searchInput')?.focus(); return; }
   if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) { e.preventDefault(); stepChannel(e.key === 'ArrowUp' ? -1 : 1); return; }
   if (e.key === 'Escape') {
-    if ($('#lightbox')) { $('#lightbox').remove(); return; }
+    if ($('#lightbox')) { closeLightbox(); return; }
     if (popover) { closePopover(); return; }
     if ($('#scrim')) { closeModal(); return; }
     if (state.voice.focus && D.channels[state.channel]?.type === 'voice') { state.voice.focus = false; renderMain(); return; }

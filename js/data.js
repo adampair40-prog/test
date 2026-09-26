@@ -123,7 +123,22 @@ export const messages = {
 };
 
 export const lastVisit = { general: at(0, 9, 42) };
-export const pinned = { general: [{ author: 'mel', text: 'Friday poster', t: at(0, 9, 40) }] };
+// Pins reference messages by id, oldest first.
+export const pinned = { general: [messages.general.find((m) => m.attachments).id] };
+
+// Community roles and invites (shown in Community settings).
+export const roles = { me: 'Owner', alex: 'Admin', morgan: 'Owner', sam: 'Admin', mel: 'Member', cole: 'Member', joe: 'Member', jake: 'Guest', mike: 'Member' };
+export const rolePerms = {
+  Owner: ['rooms', 'invite', 'pin', 'share', 'remove'],
+  Admin: ['rooms', 'invite', 'pin', 'share', 'remove'],
+  Member: ['invite', 'pin', 'share'],
+  Guest: ['share'],
+};
+export const invites = [
+  { id: 'server-h8uv2sv5', community: 'server', by: 'alex', uses: 3, expires: 'in 5 days' },
+  { id: 'server-q2m9x0aa', community: 'server', by: 'me', uses: 0, expires: 'never' },
+  { id: 'fieldwork-7kd2pp1w', community: 'fieldwork', by: 'morgan', uses: 12, expires: 'in 1 day' },
+];
 
 export const events = [
   { day: 0, h: 20, title: 'Friday co-op', who: ['alex', 'cole', 'mike', 'me'], hue: 0 },
