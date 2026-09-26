@@ -118,7 +118,7 @@ function renderTitle() {
   const online = community().members.filter((m) => m !== 'me' && person(m).status !== 'offline');
   $('#titlebar').innerHTML = `
     <button class="ibtn only-mobile" data-act="drawer" aria-label="Rooms">${icon('menu')}</button>
-    <div class="brandline">${brandMark(30)}<b>Krypt</b><span class="version">${VERSION}</span></div>
+    <div class="brandline">${brandMark(30)}<b>Krypt</b><span class="version" title="Krypt Web ${VERSION}">v${VERSION}</span></div>
     <button class="online-stack" id="onlineStack" data-act="members" aria-haspopup="dialog" aria-expanded="false" aria-label="Active community members, ${online.length} online">${online.slice(0, 5).map((id) => avatar(id, 'sm', true)).join('')}
       ${online.length > 5 ? `<span class="more">+${online.length - 5}</span>` : ''}</button>
     <div class="spacer"></div>
@@ -330,13 +330,20 @@ function composerHtml(place, visibility, compact = false) {
   </div>`;
 }
 
+// The top of every conversation says what it is, so a short history doesn't float in empty space.
+function introHtml(key) {
+  const dm = D.dms.find((d) => d.id === key);
+  if (dm) { const p = person(dm.with); return `<div class="conv-intro">${avatar(p.id, 'xl')}<h2>${esc(p.name)}</h2><p>This is the start of your direct messages with <b>${esc(p.name)}</b>. Only the two of you can read them.</p></div>`; }
+  const ch = D.channels[key]; if (!ch) return '';
+  return `<div class="conv-intro"><span class="ci-glyph">${icon(typeIcon[ch.type] || 'message')}</span><h2>Welcome to ${esc(ch.name)}</h2><p>${ch.topic ? esc(ch.topic) + ' · ' : ''}This is the start of the channel in ${esc(D.rooms[roomOf(key)]?.name || '')}.</p></div>`;
+}
 function feedHtml(key) {
   const list = D.messages[key] || [];
   if (!list.length) return `<div class="empty"><div><div class="glyph">${icon('sparkles')}</div><h3>Start the conversation</h3><p>Messages here are end-to-end encrypted. Say hello, drop a file, or type <kbd>@</kbd> to mention someone.</p></div></div>`;
   const q = state.searchOpen ? state.search.trim().toLowerCase() : '';
   const shown = q ? list.filter((m) => !m.system && m.text.toLowerCase().includes(q)) : list;
   if (q && !shown.length) return `<div class="empty"><div><div class="glyph">${icon('search')}</div><h3>No matches</h3><p>Nothing in this conversation says “${esc(state.search)}”.</p></div></div>`;
-  let html = '', prev = null, lastDay = '', newShown = false;
+  let html = q ? '' : introHtml(key), prev = null, lastDay = '', newShown = false;
   const visit = D.lastVisit[key];
   for (let i = 0; i < shown.length; i++) {
     const m = shown[i];
@@ -376,7 +383,7 @@ function messageHtml(m, cont, list, q = '') {
     return `<div class="attach-file">${icon('doc')}<div><b>${esc(a.name)}</b><small>${a.size || 'Encrypted file'}</small></div><button class="ibtn sm" aria-label="Download">${icon('download', 'sm')}</button></div>`;
   }).join('');
   const link = /krypt\.example\/fieldwork\/friday/.test(m.text)
-    ? `<div class="linkcard"><small>krypt.example · Shared document</small><b>Friday co-op — plan</b><p>Goals, roles and streaming settings for Friday night.</p></div>` : '';
+    ? `<div class="linkcard" data-act="openDoc" role="link" tabindex="0"><span class="lc-ico">${icon('doc')}</span><div><small>krypt.example · Shared document</small><b>Friday co-op — plan</b><p>Goals, roles and streaming settings for Friday night.</p></div></div>` : '';
   const reactions = m.reactions.length ? `<div class="reactions">${m.reactions.map((r) => `<button class="reaction ${r.users.includes('me') ? 'mine' : ''}" data-act="react" data-id="${m.id}" data-e="${r.e}" title="${esc(r.users.map((u) => person(u).name).join(', '))}">${r.e} ${r.users.length}</button>`).join('')}<button class="reaction add" data-act="reactPick" data-id="${m.id}" aria-label="Add reaction">${icon('smile', 'xs')}</button></div>` : '';
   const editing = state.editing === m.id;
   const arrive = !m.seen && Date.now() - m.t < 4000; m.seen = true;
@@ -561,11 +568,12 @@ function voiceView() {
   const ch = D.channels[state.channel]; const room = D.rooms[state.room];
   const here = state.voice.channel === state.channel;
   const occupants = D.voiceOccupants[state.channel] || [];
-  const tools = here ? `<div class="stage-tools">
-      <button class="ibtn ${state.voice.focus ? '' : 'on'}" data-act="layout" data-v="grid" aria-label="Grid" title="Grid">${icon('grid', 'sm')}</button>
-      <button class="ibtn ${state.voice.focus ? 'on' : ''}" data-act="layout" data-v="focus" aria-label="Focus the share" title="Focus">${icon('spotlight', 'sm')}</button>
-      <button class="ibtn ${state.share.hud ? 'on' : ''}" data-act="hud" aria-label="Stream stats" title="Stream stats">${icon('activity', 'sm')}</button>
-      <button class="ibtn ${state.voice.dock ? 'on' : ''}" data-act="dockToggle" aria-label="Chat" title="Chat">${icon('panelBottom', 'sm')}</button></div>` : '';
+  const tools = here ? `<div class="stage-tools" role="toolbar" aria-label="Stage">
+      <div class="seg-mini" role="group" aria-label="Layout"><button class="ibtn ${state.voice.focus ? '' : 'on'}" data-act="layout" data-v="grid" aria-pressed="${!state.voice.focus}" aria-label="Grid layout" title="Grid">${icon('grid', 'sm')}</button>
+      <button class="ibtn ${state.voice.focus ? 'on' : ''}" data-act="layout" data-v="focus" aria-pressed="${state.voice.focus}" aria-label="Focus the share" title="Focus">${icon('spotlight', 'sm')}</button></div>
+      <span class="vr" aria-hidden="true"></span>
+      <button class="ibtn toggle-i ${state.share.hud ? 'on' : ''}" data-act="hud" aria-pressed="${state.share.hud}" aria-label="Stream stats" title="Stream stats">${icon('activity', 'sm')}</button>
+      <button class="ibtn toggle-i ${state.voice.dock ? 'on' : ''}" data-act="dockToggle" aria-pressed="${state.voice.dock}" aria-label="Chat panel" title="Chat panel">${icon('panelBottom', 'sm')}</button></div>` : '';
   let body;
   if (!here) {
     body = `<div class="join-card">
@@ -589,11 +597,11 @@ function voiceView() {
       ${people.map((id) => {
         const muted = id === 'me' ? state.voice.muted : id === 'mike';
         return `<div class="tile" data-tile="${id}"><div class="who">${avatar(id, 'lg')}<b>${esc(person(id).name)}${id === 'me' ? '<span class="you">You</span>' : ''}</b>
-        <span class="state" data-state="${id}">${muted ? icon('micOff', 'xs') + ' Mic muted' : icon('mic', 'xs') + ' Listening'}</span></div></div>`;
+        <span class="state ${muted ? 'muted' : 'quiet'}" data-state="${id}" title="${muted ? 'Mic muted' : ''}">${muted ? icon('micOff', 'xs') : ''}</span></div></div>`;
       }).join('')}
     </div>`;
   }
-  const dock = here && state.voice.dock ? `<div class="dock"><div class="dhead"><b>${icon('message', 'sm')} ${esc(ch.name)} chat</b><button class="ibtn sm" data-act="dockToggle" aria-label="Hide chat">${icon('chevronDown', 'sm')}</button></div>
+  const dock = here && state.voice.dock ? `<div class="dock"><div class="dhead"><b>${icon('message', 'sm')} Chat<small>${esc(ch.name)}</small></b><button class="ibtn sm" data-act="dockToggle" aria-label="Hide chat">${icon('chevronDown', 'sm')}</button></div>
     <div class="feed" id="feed"><div class="feed-inner" id="feedInner">${feedHtml(state.channel)}</div></div><div class="typing" id="typing"></div>
     ${composerHtml(`Message ${ch.name}`, '', true)}</div>` : '';
   return `<section class="view" aria-label="Voice channel">
@@ -666,7 +674,7 @@ function tickVoice() {
       tile.classList.toggle('speaking', l > 0.35);
       const av = $('.avatar', tile); if (av) av.style.transform = `scale(${1 + l * 0.08})`;
       const st = $(`[data-state="${id}"]`);
-      if (st && !muted) st.innerHTML = l > 0.35 ? '<span class="eq"><i></i><i></i><i></i><i></i></span> Speaking' : icon('mic', 'xs') + ' Listening';
+      if (st && !muted) { const sp = l > 0.35; if (st.dataset.on !== String(sp)) { st.dataset.on = sp; st.innerHTML = sp ? '<span class="eq"><i></i><i></i><i></i><i></i></span>' : ''; st.classList.toggle('quiet', !sp); st.title = sp ? 'Speaking' : ''; } }
     }
   }
   const note = $('#speakingNote');
@@ -1431,6 +1439,7 @@ const act = {
     if (fromList && anchor?.isConnected && D.pinned[key].length) pinsPopover(anchor);
     toast(was ? 'Unpinned' : 'Pinned', was ? 'Removed from this conversation’s pins' : 'Everyone here can find it under Pinned', 'pin', 'ok');
   },
+  openDoc() { go('server', 'alex-room', 'docs'); },
   gotoPin(el) { closePopover(); act.gotoMsg(el); },
   deleteMsg(el) { closePopover(); const key = convKey(); D.messages[key] = D.messages[key].filter((m) => m.id !== Number(el.dataset.id)); refreshFeed(false); renderSide(); toast('Message deleted', 'Removed from every device', 'trash'); },
   gotoMsg(el) { const t = $(`.msg[data-mid="${el.dataset.id}"]`); if (t) { t.scrollIntoView({ block: 'center', behavior: 'smooth' }); t.classList.remove('flash'); void t.offsetWidth; t.classList.add('flash'); } },
