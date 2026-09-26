@@ -166,8 +166,28 @@ function renderSide() {
       <div class="list" role="list">${rooms}</div></section>
     <section class="section"><div class="section-head"><h2>Direct messages</h2><button class="ibtn" data-act="newDm" aria-label="New message">${icon('plus', 'sm')}</button></div>
       <div class="list">${dms}</div></section>
-    <div class="footer-note">${icon('lock', 'xs')} End-to-end encrypted · keys never leave your devices</div>`;
+    <div class="footer-note" title="Keys never leave your devices">${icon('lock', 'xs')} End-to-end encrypted</div>`;
   $('#app')?.classList.toggle('drawer', state.drawer);
+  $$('#side .list').forEach(watchEdges);
+  updateTitle();
+}
+
+// Fades a scroller's edge only where more content is hidden beyond it.
+function edgeState(el) {
+  const x = el.classList.contains('tabstrip');
+  const pos = x ? el.scrollLeft : el.scrollTop, max = x ? el.scrollWidth - el.clientWidth : el.scrollHeight - el.clientHeight;
+  el.classList.toggle('fade-start', pos > 2);
+  el.classList.toggle('fade-end', pos < max - 2);
+}
+function watchEdges(el) {
+  if (!el) return;
+  if (!el.dataset.edges) { el.dataset.edges = '1'; el.addEventListener('scroll', () => edgeState(el), { passive: true }); }
+  requestAnimationFrame(() => edgeState(el));
+}
+function updateTitle() {
+  const unread = Object.values(state.unread).reduce((n, v) => n + (v || 0), 0);
+  const where = state.dm ? person(D.dms.find((d) => d.id === state.dm)?.with).name : `${D.channels[state.channel]?.name} · ${D.rooms[state.room]?.name}`;
+  document.title = `${unread ? `(${unread}) ` : ''}${where} — Krypt`;
 }
 
 function renderTabs() {
@@ -190,6 +210,8 @@ function renderTabs() {
       <button class="btn room-settings keep" data-act="roomSettings" aria-label="Room settings" title="Room settings">${icon('settings', 'sm')}<span>Room settings</span></button></div>`;
   }
   requestAnimationFrame(moveIndicator);
+  watchEdges($('#tabstrip') || $('.tabstrip'));
+  updateTitle();
 }
 function moveIndicator() {
   const strip = $('.tabstrip'); const sel = $('.tab[aria-selected="true"]'); const ind = $('.tab-indicator');
@@ -202,6 +224,8 @@ function moveIndicator() {
 // ------------------------------------------------------------------ main views
 function renderMain() {
   stopStage();
+  // The call keeps ticking (levels, ping, speaking rings) whichever view is open.
+  if (state.voice.channel) stageTimer = setInterval(tickVoice, 120);
   const main = $('#main');
   if (state.dm) { main.innerHTML = chatView(state.dm, 'dm'); afterChat(); return; }
   const ch = D.channels[state.channel];
@@ -550,7 +574,6 @@ function afterVoice() {
   const canvas = $('#aurora');
   if (canvas) startAurora(canvas);
   if (state.voice.channel === state.channel) {
-    stageTimer = setInterval(tickVoice, 120);
     if ($('#feed')) { scrollFeed(true); const i = $('#input'); if (i) { i.addEventListener('input', () => { autoGrow(i); updateSend(); }); i.addEventListener('keydown', composerKey); } }
   }
 }
@@ -609,7 +632,7 @@ function tickVoice() {
     }
   }
   const note = $('#speakingNote');
-  if (note) { const s = [...v.speaking].filter((x) => x !== 'me'); note.innerHTML = s.length ? `<span class="eq"><i></i><i></i><i></i><i></i></span> ${esc(person(s[0]).name)}${s.length > 1 ? ` and ${s.length - 1} more` : ''} ${s.length > 1 ? 'are' : 'is'} speaking` : ''; }
+  if (note) { const s = [...v.speaking].filter((x) => x !== 'me'); note.innerHTML = s.length ? `<span class="eq"><i></i><i></i><i></i><i></i></span><span class="t">${esc(person(s[0]).name)}${s.length > 1 ? ` and ${s.length - 1} more` : ''} ${s.length > 1 ? 'are' : 'is'} speaking</span>` : ''; }
   $$('#voicebar .vpeople .avatar').forEach((a) => a.classList.toggle('speaking', v.speaking.has(a.dataset.person)));
   const meter = $('#myMeter'); if (meter) meter.style.height = `${(v.muted ? 0 : v.levels.me || 0) * 100}%`;
   if (Math.random() < 0.25) updateHud();
@@ -626,11 +649,13 @@ function updateHud() {
   });
   const ping = Math.round(22 + Math.random() * 6); state.voice.ping.push(ping); if (state.voice.ping.length > 20) state.voice.ping.shift();
   const pv = $('#pingValue'); if (pv) pv.textContent = ping + ' ms';
-  const sp = $('#pingSpark'); if (sp) sp.setAttribute('d', state.voice.ping.map((p, i) => `${i ? 'L' : 'M'}${(i / 19) * 44},${18 - ((p - 18) / 14) * 16}`).join(' '));
+  const sp = $('#pingSpark'); if (sp) sp.setAttribute('d', pingPath());
 }
 
+function pingPath() { return state.voice.ping.map((p, i) => `${i ? 'L' : 'M'}${(i / 19) * 44},${18 - ((p - 18) / 14) * 16}`).join(' '); }
 function joinVoice(id) {
   state.voice.channel = id; state.voice.joinedAt = Date.now(); state.voice.levels = {};
+  state.voice.ping = Array.from({ length: 20 }, () => Math.round(22 + Math.random() * 6));
   toast('Voice connected', `${D.channels[id].name} · encrypted`, 'phone', 'ok');
   renderVoicebar(); renderSide(); renderTabs();
   if (state.channel === id) renderMain();
@@ -660,11 +685,11 @@ function renderVoicebar() {
     <div class="vpeople">${participants().map((id) => avatar(id, '', false, `data-act="profile" data-id="${id}" role="button" tabindex="0"`)).join('')}</div>
     <div class="speaking-note" id="speakingNote"></div>
     <div class="spacer"></div><div class="vctl">
-    <span class="ping" title="Round-trip time">${icon('signal', 'sm')}<span id="pingValue">24 ms</span><svg class="spark" viewBox="0 0 44 18"><path id="pingSpark" d=""/></svg></span>
-    <span class="pill ${v.muted ? 'muted' : ''}"><button data-act="mute" aria-pressed="${v.muted}" title="Ctrl+Shift+M">${icon(v.muted ? 'micOff' : 'mic', 'sm')}<span class="mic-meter"><i id="myMeter"></i></span><span>${v.muted ? 'Mic muted' : 'Mic on'}</span></button><button data-act="micMenu" aria-label="Microphone options">${icon('chevronDown', 'sm')}</button></span>
+    <span class="ping" title="Round-trip time">${icon('signal', 'sm')}<span id="pingValue">${v.ping.at(-1) ?? 24} ms</span><svg class="spark" viewBox="0 0 44 18"><path id="pingSpark" d="${pingPath()}"/></svg></span>
+    <span class="pill ${v.muted ? 'muted' : ''}"><button data-act="mute" aria-pressed="${v.muted}" title="Ctrl+Shift+M">${icon(v.muted ? 'micOff' : 'mic', 'sm')}${v.muted ? '' : '<span class="mic-meter" aria-hidden="true"><i id="myMeter"></i></span>'}<span>${v.muted ? 'Mic muted' : 'Mic on'}</span></button><button data-act="micMenu" aria-label="Microphone options">${icon('chevronDown', 'sm')}</button></span>
     ${split(icon(v.deafened ? 'headphonesOff' : 'headphones', 'sm'), v.deafened ? 'Deafened' : 'Deafen', 'outMenu', v.deafened ? 'muted' : '', 'deafen', 'opt')}
     <span class="pill ${v.sharing ? 'on' : ''}"><button data-act="${v.sharing ? 'stopShare' : 'sharePicker'}" title="${v.sharing ? 'Stop sharing' : 'Share screen'}">${icon(v.sharing ? 'monitorOff' : 'monitorUp', 'sm')}<span class="opt">${v.sharing ? 'Stop share' : 'Share screen'}</span></button></span>
-    <span class="pill leave"><button data-act="leave" title="Leave call">${icon('hangup', 'sm')}<span>Leave call</span></button></span></div>`;
+    <span class="pill leave"><button data-act="leave" title="Leave call">${icon('leave', 'sm')}<span>Leave call</span></button></span></div>`;
 }
 
 // ------------------------------------------------------------------ calendar, docs, tasks
@@ -677,7 +702,7 @@ function calendarView() {
   for (let i = 0; i < 42; i++) {
     const d = new Date(start); d.setDate(start.getDate() + i);
     const evs = D.events.filter((e) => { const x = new Date(); x.setDate(x.getDate() + e.day); return x.toDateString() === d.toDateString(); });
-    cells.push(`<div class="cal-cell ${d.getMonth() !== month ? 'other' : ''} ${d.toDateString() === today ? 'today' : ''}" data-act="addEvent" data-date="${d.toISOString()}">
+    cells.push(`<div class="cal-cell ${d.getMonth() !== month ? 'other' : ''} ${d.toDateString() === today ? 'today' : ''} ${d.getDay() % 6 === 0 ? 'weekend' : ''}" data-act="addEvent" data-date="${d.toISOString()}">
       <span class="d">${d.getDate()}</span>${evs.map((e) => `<span class="ev" style="--eh:${e.hue}" title="${esc(e.title)} · ${pad(e.h)}:00">${pad(e.h)}:00 ${esc(e.title)}</span>`).join('')}</div>`);
   }
   const upcoming = D.events.filter((e) => e.day >= 0).sort((a, b) => a.day - b.day)[0];
@@ -760,7 +785,8 @@ function modal(html, { cls = '', label = 'Dialog' } = {}) {
   s.addEventListener('mousedown', (e) => { if (e.target === s) closeModal(); });
   document.body.append(s);
   s.dataset.return = document.activeElement?.dataset?.act || '';
-  setTimeout(() => (s.querySelector('input:not([readonly]), [autofocus]') || s.querySelector('.modal'))?.focus(), 30);
+  // Settings opens on its nav, not on a colour picker halfway down the pane.
+  setTimeout(() => (s.querySelector('[autofocus]') || (cls.includes('settings') ? null : s.querySelector('input:not([readonly])')) || s.querySelector('.modal'))?.focus({ preventScroll: true }), 30);
   return s;
 }
 function closeModal() { const s = $('#scrim'); if (!s) return; s.remove(); micStop(); }
@@ -841,7 +867,7 @@ function roomSettingsModal() {
   const room = D.rooms[state.room];
   modal(`<header>${icon('settings')}<h2>Room settings</h2><button class="ibtn" data-act="closeModal" aria-label="Close">${icon('x')}</button></header>
     <div class="mbody">
-      <div class="field" style="border-top:0;padding-top:0"><label for="roomName">Name<small>Shown to everyone in ${esc(community().name)}</small></label><input id="roomName" value="${esc(room.name)}" style="height:40px;padding:0 12px;border-radius:var(--r-md);border:1px solid var(--line-2);background:var(--sunken)"></div>
+      <div class="field" style="border-top:0;padding-top:0"><label for="roomName">Name<small>Shown to everyone in ${esc(community().name)}</small></label><input class="input" id="roomName" value="${esc(room.name)}" autocomplete="off"></div>
       <div class="field" style="align-items:start"><div class="label">Channels<small>${room.channels.length} in this room</small></div><div style="display:grid;gap:4px">${room.channels.map((id) => `<div class="menu-item" style="cursor:default">${icon(typeIcon[D.channels[id].type])}${esc(D.channels[id].name)}<span class="hint">${D.channels[id].type}</span></div>`).join('')}
         <button class="menu-item" data-act="newChannel">${icon('plus')}Add a channel</button></div></div>
       <div class="field"><div class="label">Notifications<small>For every channel in this room</small></div>${toggle('room_notify', true, 'Room notifications')}</div>
@@ -968,7 +994,7 @@ function settingsPane() {
       <div class="field"><div class="label">Share audio<small>When the browser allows it</small></div>${toggle('shareAudio', true, 'Share audio')}</div>`;
     case 'notifications': return `<h3>Notifications</h3><p class="lede">Choose what reaches you when you’re somewhere else.</p>
       ${[['mentions', 'Mentions', 'When someone writes @adam'], ['dms', 'Direct messages', 'Every new DM'], ['sounds', 'Sounds', 'Join, leave and message sounds'], ['desktop', 'Browser notifications', 'Pop-ups while this tab is in the background']].map(([k, l, s]) => `<div class="field"><div class="label">${l}<small>${s}</small></div>${toggle('n_' + k, state.notify[k], l)}</div>`).join('')}`;
-    case 'keybinds': return `<h3>Keybinds</h3><p class="lede">Everything important is one shortcut away. Press <kbd>?</kbd> anywhere to see this list.</p><div class="keys">${SHORTCUTS.map(([k, d]) => `<div><span>${d}</span><span class="k">${k.split(' ').map((x) => `<kbd>${x}</kbd>`).join('')}</span></div>`).join('')}</div>`;
+    case 'keybinds': return `<h3>Keybinds</h3><p class="lede">Everything important is one shortcut away. Press <kbd>Ctrl</kbd> <kbd>/</kbd> anywhere to see this list.</p><div class="keys">${SHORTCUTS.map(([k, d]) => `<div><span>${d}</span><span class="k">${k.split(' ').map((x) => `<kbd>${x}</kbd>`).join('')}</span></div>`).join('')}</div>`;
     case 'devices': return `<h3>Devices & privacy</h3><p class="lede">Your account lives on your devices. Each one has its own key, and you can remove any of them.</p>
       <div class="devices">${D.devices.map((d) => `<div class="device"><span class="ico">${icon(d.icon)}</span><div class="t"><b>${esc(d.name)}</b><small>${esc(d.detail)} · ${d.seen}</small></div>${d.current ? '<span class="pillnote">This device</span>' : `<button class="btn sm danger" data-act="revoke" data-id="${d.id}">Remove</button>`}</div>`).join('')}</div>
       <div class="link-qr">${linkGrid('adam-link')}<div><h4 style="margin:0 0 6px">Link a new device</h4><p style="margin:0 0 12px;color:var(--text-2)">Open Krypt on the other device, choose <b>Link to an existing account</b> and scan this code. Your history transfers encrypted, directly between devices.</p><button class="btn sm" data-act="toastCopy">${icon('copy', 'sm')}Copy link code</button></div></div>
@@ -1033,14 +1059,14 @@ function inviteModal() {
   const link = `https://krypt.example/join#${community().id}-${Math.random().toString(36).slice(2, 10)}`;
   modal(`<header>${icon('link')}<h2>Invite people to ${esc(community().name)}</h2><button class="ibtn" data-act="closeModal" aria-label="Close">${icon('x')}</button></header>
     <div class="mbody"><p style="margin:0 0 14px;color:var(--text-2)">Anyone with this link can join. The secret after <code>#</code> never reaches the server’s logs.</p>
-    <div style="display:flex;gap:8px"><input readonly value="${link}" style="flex:1;height:40px;padding:0 12px;border-radius:6px;border:1px solid var(--line-2);background:var(--sunken)" aria-label="Invite link"><button class="btn primary" data-act="toastCopy">${icon('copy', 'sm')}Copy</button></div>
+    <div style="display:flex;gap:8px"><input class="input" readonly value="${link}" aria-label="Invite link" onfocus="this.select()"><button class="btn primary" data-act="toastCopy">${icon('copy', 'sm')}Copy</button></div>
     <div class="field" style="margin-top:14px"><div class="label">Expires</div>${seg('expire', '7d', [['1d', '1 day'], ['7d', '7 days'], ['never', 'Never']])}</div>
     <p style="margin:8px 0 0;font-size:var(--fs-caption);color:var(--text-3)">See what they’ll see: <a href="join.html">open the invite page</a></p></div>`, { label: 'Invite people' });
 }
 const SHORTCUTS = [
   ['Ctrl K', 'Search and jump anywhere'], ['Ctrl ,', 'Open settings'], ['Ctrl Shift M', 'Mute or unmute'], ['Ctrl Shift D', 'Deafen'],
   ['Alt ↑', 'Previous channel'], ['Alt ↓', 'Next channel'], ['Ctrl F', 'Search this conversation'], ['/', 'Focus the message box'],
-  ['↑', 'Edit your last message'], ['Esc', 'Close or cancel'], ['?', 'Show shortcuts'],
+  ['↑', 'Edit your last message'], ['Ctrl Shift L', 'Switch light or dark'], ['Esc', 'Close or cancel'], ['Ctrl /', 'Show shortcuts'],
 ];
 function shortcutSheet() {
   modal(`<header>${icon('keyboard')}<h2>Keyboard shortcuts</h2><button class="ibtn" data-act="closeModal" aria-label="Close">${icon('x')}</button></header>
@@ -1100,7 +1126,7 @@ const act = {
     closePopover();
     modal(`<header>${icon('plus')}<h2>Add a channel</h2><button class="ibtn" data-act="closeModal" aria-label="Close">${icon('x')}</button></header>
       <div class="mbody"><div class="palettes" style="grid-template-columns:repeat(auto-fill,minmax(120px,1fr))">${[['text', 'Text'], ['voice', 'Voice'], ['calendar', 'Calendar'], ['docs', 'Document'], ['tasks', 'Tasks']].map(([t, n], i) => `<button class="pal" data-ctype="${t}" aria-pressed="${i === 0}" style="padding:16px;display:grid;gap:8px;justify-items:start">${icon(typeIcon[t], 'lg')}<b>${n}</b></button>`).join('')}</div>
-      <label style="display:block;margin-top:16px;font-weight:500">Name<input id="chName" placeholder="e.g. clips" style="display:block;width:100%;margin-top:6px;height:40px;padding:0 12px;border-radius:6px;border:1px solid var(--line-2);background:var(--sunken)"></label></div>
+      <label style="display:block;margin-top:16px;font-weight:500">Name<input class="input" id="chName" placeholder="e.g. clips" autocomplete="off" style="margin-top:6px"></label></div>
       <footer><button class="btn ghost" data-act="closeModal">Cancel</button><button class="btn primary" id="mkChannel">Create</button></footer>`, { label: 'Add a channel' });
     let type = 'text';
     $('#scrim').addEventListener('click', (e) => {
@@ -1125,7 +1151,7 @@ const act = {
   meMenu(el) {
     openPopover(el, `<div style="display:flex;gap:12px;align-items:center;padding:8px 10px 10px">${avatar('me', 'md', true, 'style="--dot-ring: var(--surface)"')}<div><b>${esc(person('me').name)}</b><div style="font-size:12px;color:var(--text-3)">@adam</div></div></div><div class="menu-sep"></div>
       ${[['online', 'Online'], ['idle', 'Away'], ['dnd', 'Do not disturb'], ['offline', 'Invisible']].map(([s, n]) => `<button class="menu-item ${state.status === s ? 'checked' : ''}" data-act="status" data-v="${s}"><span class="avatar xs" style="background:none;width:14px;height:14px"><i class="dot ${s}" style="position:static;width:10px;height:10px;min-width:0;min-height:0;box-shadow:none;display:block"></i></span>${n}</button>`).join('')}
-      <div class="menu-sep"></div><button class="menu-item" data-act="profile" data-id="me">${icon('user')}View profile</button><button class="menu-item" data-act="themeFlip">${icon(currentLight() ? 'moon' : 'sun')}${currentLight() ? 'Dark mode' : 'Light mode'}<span class="hint">theme</span></button><button class="menu-item" data-act="settings">${icon('settings')}Settings<span class="hint">Ctrl ,</span></button><button class="menu-item" data-act="shortcuts">${icon('keyboard')}Shortcuts<span class="hint">?</span></button>
+      <div class="menu-sep"></div><button class="menu-item" data-act="profile" data-id="me">${icon('user')}View profile</button><button class="menu-item" data-act="themeFlip">${icon(currentLight() ? 'moon' : 'sun')}${currentLight() ? 'Dark mode' : 'Light mode'}<span class="hint">Ctrl Shift L</span></button><button class="menu-item" data-act="settings">${icon('settings')}Settings<span class="hint">Ctrl ,</span></button><button class="menu-item" data-act="shortcuts">${icon('keyboard')}Shortcuts<span class="hint">Ctrl /</span></button>
       <div class="menu-sep"></div><button class="menu-item danger" data-act="signout">${icon('logout')}Sign out of this browser</button>`, { align: 'end' });
   },
   status(el) { state.status = el.dataset.v; closePopover(); renderTitle(); toast('Status updated', { online: 'Online', idle: 'Away', dnd: 'Do not disturb', offline: 'Invisible' }[state.status], 'user'); },
@@ -1204,13 +1230,22 @@ const act = {
   cal(el) { const d = Number(el.dataset.d); state.calendarOffset = d === 0 ? 0 : state.calendarOffset + d; renderMain(); },
   addEvent(el) {
     const date = el.dataset.date ? new Date(el.dataset.date) : new Date();
-    const pop = openPopover(el, `<div style="padding:6px;display:grid;gap:8px;width:260px"><div class="menu-label" style="padding:0">New event · ${date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</div><input id="evTitle" placeholder="What’s happening?" style="height:36px;padding:0 10px;border-radius:6px;border:1px solid var(--line-2);background:var(--sunken)"><div style="display:flex;gap:8px"><input id="evHour" type="number" min="0" max="23" value="20" style="width:70px;height:36px;padding:0 10px;border-radius:6px;border:1px solid var(--line-2);background:var(--sunken)" aria-label="Hour"><button class="btn sm primary" id="evSave" style="flex:1;justify-content:center">Add to calendar</button></div></div>`, { keepFocus: true });
+    const pop = openPopover(el, `<div style="padding:6px;display:grid;gap:8px;width:260px"><div class="menu-label" style="padding:0">New event · ${date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</div><input class="input sm" id="evTitle" placeholder="What’s happening?" autocomplete="off"><div style="display:flex;gap:8px"><input class="input sm" id="evHour" type="number" min="0" max="23" value="20" style="width:76px" aria-label="Hour"><button class="btn sm primary" id="evSave" style="flex:1;justify-content:center">Add to calendar</button></div></div>`, { keepFocus: true });
     $('#evTitle').focus();
     const save = () => { const title = $('#evTitle').value.trim(); if (!title) return; const day = Math.round((new Date(date.toDateString()) - new Date(new Date().toDateString())) / 86400000); D.events.push({ day, h: clamp(Number($('#evHour').value) || 20, 0, 23), title, who: ['me'], hue: Math.floor(Math.random() * 360) }); closePopover(); renderMain(); toast('Event added', title, 'calendar', 'ok'); };
     $('#evSave').onclick = save; $('#evTitle').onkeydown = (e) => { if (e.key === 'Enter') save(); };
     pop.addEventListener('click', (e) => e.stopPropagation());
   },
-  addTask(el) { const title = prompt('New task'); if (!title) return; D.tasks.items.push({ id: 't' + Date.now(), col: el.dataset.col || 'todo', title, who: 'me', tag: 'Plan' }); renderMain(); },
+  addTask(el) {
+    // An inline draft card instead of a browser prompt.
+    $('.card.new')?.remove();
+    const col = $(`.col[data-col="${el.dataset.col || 'todo'}"] .cards`); if (!col) return;
+    col.insertAdjacentHTML('afterbegin', `<div class="card new"><textarea id="taskDraft" rows="2" placeholder="What needs doing?" aria-label="New task"></textarea><footer><button class="btn sm ghost" data-act="cancelTask">Cancel</button><button class="btn sm primary" data-act="saveTask" data-col="${el.dataset.col || 'todo'}">Add</button></footer></div>`);
+    const t = $('#taskDraft'); t.focus();
+    t.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); act.saveTask($('[data-act="saveTask"]')); } if (e.key === 'Escape') { e.stopPropagation(); act.cancelTask(); } });
+  },
+  saveTask(el) { const title = $('#taskDraft')?.value.trim(); if (!title) { $('#taskDraft')?.focus(); return; } D.tasks.items.unshift({ id: 't' + Date.now(), col: el.dataset.col, title, who: 'me', tag: 'Plan' }); renderMain(); toast('Task added', title, 'checkCircle', 'ok'); },
+  cancelTask() { $('.card.new')?.remove(); },
   // settings
   set(el) {
     const { k, v } = el.dataset;
@@ -1258,6 +1293,8 @@ document.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
   if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); return; }
   if (mod && e.key === ',') { e.preventDefault(); openSettings(); return; }
+  if (mod && e.key === '/') { e.preventDefault(); if ($('#scrim .sheet-grid')) closeModal(); else shortcutSheet(); return; }
+  if (mod && e.shiftKey && e.key.toLowerCase() === 'l') { e.preventDefault(); act.themeFlip(); return; }
   if (mod && e.shiftKey && e.key.toLowerCase() === 'm') { e.preventDefault(); act.mute(); return; }
   if (mod && e.shiftKey && e.key.toLowerCase() === 'd') { e.preventDefault(); act.deafen(); return; }
   if (mod && e.key.toLowerCase() === 'f' && (state.dm || D.channels[state.channel]?.type === 'text')) { e.preventDefault(); if (!state.searchOpen) act.search(); else $('#searchInput')?.focus(); return; }
@@ -1270,7 +1307,7 @@ document.addEventListener('keydown', (e) => {
     if (state.searchOpen) { act.search(); return; }
   }
   if (typing) return;
-  if (e.key === '?') { e.preventDefault(); shortcutSheet(); }
+  if (e.key === '?' && !$('#scrim')) { e.preventDefault(); shortcutSheet(); }
   else if (e.key === '/') { e.preventDefault(); $('#input')?.focus(); }
   else if (e.key.toLowerCase() === 'p' && state.voice.channel) popOut();
   else if (e.key.length === 1 && !mod && !e.altKey && $('#input') && !$('#scrim')) $('#input').focus();

@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101c16">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="You’ve been invited to a Krypt community — private chat, voice and screen sharing between friends.">
+  <title>You’re invited — Krypt</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="assets/fonts/Inter-Regular.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="preload" href="assets/fonts/Inter-SemiBold.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="stylesheet" href="css/krypt.css">
+  <style>
+    body { overflow: auto; background: var(--well); }
+    .join { min-height: 100dvh; display: grid; grid-template-rows: auto 1fr auto; }
+    .join-top { display: flex; align-items: center; gap: 10px; padding: 18px 24px; }
+    .join-top b { font-size: 21px; font-weight: 600; letter-spacing: -.01em; }
+    .join-top a { margin-left: auto; }
+    .join-main { position: relative; display: grid; place-items: center; align-content: center; padding: 24px 16px 48px; overflow: hidden; }
+    .join-main::before { content: ''; position: absolute; inset: -20% -10% auto; height: 70%; background: radial-gradient(closest-side at 42% 50%, rgb(var(--accent-rgb) / .14), transparent), radial-gradient(closest-side at 62% 58%, color-mix(in srgb, var(--presence) 10%, transparent), transparent); pointer-events: none; }
+    .join-main > div { width: min(460px, 100%); }
+    .invite { position: relative; width: 100%; padding: 32px 28px 24px; border-radius: 18px; text-align: center; background: color-mix(in srgb, var(--bg) 88%, transparent); border: 1px solid var(--line-2); box-shadow: var(--shadow-modal); backdrop-filter: blur(18px); animation: modal-in 420ms var(--ease-spring); }
+    .invite .ctile-lg { width: 84px; height: 84px; margin: 0 auto 18px; border-radius: 22px; overflow: hidden; box-shadow: 0 0 0 4px var(--bg), 0 12px 32px -10px rgb(0 0 0 / .6); }
+    .invite .ctile-lg svg { width: 100%; height: 100%; display: block; }
+    .invite small.kicker { display: block; font-size: var(--fs-caption); font-weight: 500; color: var(--text-2); }
+    .invite h1 { margin: 4px 0 6px; font-size: 30px; font-weight: 600; letter-spacing: -.02em; }
+    .invite .meta { display: flex; justify-content: center; gap: 16px; font-size: var(--fs-caption); color: var(--text-2); }
+    .invite .meta span { display: inline-flex; align-items: center; gap: 6px; }
+    .invite .meta i { width: 8px; height: 8px; border-radius: 50%; background: var(--presence); }
+    .invite .meta i.off { background: var(--text-4); }
+    .invite .who { display: flex; justify-content: center; margin: 20px 0 6px; }
+    .invite .who .avatar { margin: 0 -6px; box-shadow: 0 0 0 3px var(--bg); }
+    .invite .who-note { margin: 0 0 22px; font-size: var(--fs-caption); color: var(--text-3); }
+    .invite form { display: grid; gap: 10px; text-align: left; }
+    .invite label { font-size: var(--fs-caption); font-weight: 500; color: var(--text-2); }
+    .invite .btn.lg { width: 100%; justify-content: center; margin-top: 6px; }
+    .invite .alt { margin-top: 14px; font-size: var(--fs-caption); color: var(--text-3); }
+    .invite .alt a { font-weight: 500; }
+    .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; width: 100%; margin: 16px auto 0; position: relative; }
+    .facts div { padding: 12px; border-radius: var(--r-lg); background: color-mix(in srgb, var(--bg) 70%, transparent); border: 1px solid var(--line); font-size: var(--fs-micro); color: var(--text-2); line-height: 1.45; }
+    .facts .i { display: block; margin-bottom: 6px; color: var(--accent-text); }
+    .facts b { display: block; color: var(--text); font-size: var(--fs-caption); font-weight: 600; }
+    .join-foot { padding: 16px 24px 24px; text-align: center; font-size: var(--fs-micro); color: var(--text-3); }
+    .done { display: none; }
+    .invite.accepted form, .invite.accepted .alt { display: none; }
+    .invite.accepted .done { display: block; animation: view-in var(--t-fade) var(--ease); }
+    .done .check { width: 56px; height: 56px; margin: 4px auto 12px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--success) 16%, transparent); color: var(--success); }
+    .done .check .i { width: 28px; height: 28px; }
+    .done p { margin: 0 0 16px; color: var(--text-2); }
+    @media (max-width: 520px) { .facts { grid-template-columns: 1fr; } .facts div { display: grid; grid-template-columns: 20px 1fr; column-gap: 10px; } .facts .i { grid-row: span 2; margin: 1px 0 0; } .invite { padding: 28px 20px 20px; } .invite h1 { font-size: 26px; } }
+  </style>
+</head>
+<body>
+  <noscript><p style="padding:24px;font-family:system-ui">Krypt Web needs JavaScript to run.</p></noscript>
+  <script type="module">
+    import { buildPalette, applyPalette } from './js/theme.js';
+    import { icon, brandMark } from './js/icons.js';
+    import { critter, communityTile } from './js/art.js';
+    import * as D from './js/data.js';
+
+    let theme = { preset: 'fern', custom: null, accent: null, mode: 'dark' };
+    try { theme = { ...theme, ...JSON.parse(localStorage.getItem('krypt-web:theme') || '{}') }; } catch { /* private mode */ }
+    const light = theme.mode === 'light' || (theme.mode === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
+    applyPalette(buildPalette({ preset: theme.preset, custom: theme.custom, accent: theme.accent, light }), light);
+
+    const esc = (s = '') => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const id = (location.hash.slice(1).split('-')[0]) || 'server';
+    const c = D.communities.find((x) => x.id === id) || D.communities[0];
+    const members = c.members.filter((m) => m !== 'me');
+    const online = members.filter((m) => D.people[m].status !== 'offline');
+    const host = D.people[D.rooms[c.rooms[0]].owner];
+    document.title = `Join ${c.name} — Krypt`;
+
+    document.body.innerHTML = `<div class="join">
+      <header class="join-top">${brandMark(30)}<b>Krypt</b><a class="btn sm ghost" href="index.html">Open Krypt</a></header>
+      <main class="join-main"><div>
+        <section class="invite" id="invite" aria-labelledby="joinTitle">
+          <div class="ctile-lg">${communityTile(c.id + 'join', c.hue)}</div>
+          <small class="kicker">${esc(host.name)} invited you to join</small>
+          <h1 id="joinTitle">${esc(c.name)}</h1>
+          <div class="meta"><span><i></i>${online.length} online</span><span><i class="off"></i>${c.members.length} members</span><span>${c.rooms.length} rooms</span></div>
+          <div class="who">${online.slice(0, 5).map((m) => `<span class="avatar md" title="${esc(D.people[m].name)}">${critter(m + D.people[m].name, D.people[m].hue)}</span>`).join('')}</div>
+          <p class="who-note">${online.slice(0, 2).map((m) => esc(D.people[m].name)).join(', ')}${online.length > 2 ? ` and ${online.length - 2} others are around` : ' are around'}</p>
+          <form id="joinForm" novalidate>
+            <label for="displayName">What should people call you?</label>
+            <input class="input" id="displayName" placeholder="Display name" autocomplete="nickname" maxlength="32" required>
+            <button class="btn primary lg" type="submit">${icon('arrowRight', 'sm')}Accept invite</button>
+          </form>
+          <p class="alt">Already use Krypt? <a href="index.html">Link this browser to your account</a></p>
+          <div class="done" role="status"><div class="check">${icon('check')}</div><h2 style="margin:0 0 6px;font-size:21px">You’re in</h2><p id="doneText"></p><a class="btn primary lg" href="index.html">${icon('message', 'sm')}Go to ${esc(c.name)}</a></div>
+        </section>
+        <div class="facts">
+          <div>${icon('lock', 'sm')}<b>Encrypted</b>Messages and calls are end to end.</div>
+          <div>${icon('key', 'sm')}<b>Your keys</b>Made on this device. Never uploaded.</div>
+          <div>${icon('monitorUp', 'sm')}<b>Full speed</b>Share screens at up to 1440p60.</div>
+        </div>
+      </div></main>
+      <footer class="join-foot">This is a design preview — nothing you type leaves this page.</footer>
+    </div>`;
+
+    const form = document.getElementById('joinForm');
+    const input = document.getElementById('displayName');
+    input.focus();
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = input.value.trim();
+      if (!name) { input.focus(); input.style.borderColor = 'var(--danger)'; input.placeholder = 'Pick a name first'; return; }
+      document.getElementById('doneText').textContent = `Welcome, ${name}. A key for this browser was created and ${c.name} knows you’re coming.`;
+      document.getElementById('invite').classList.add('accepted');
+    });
+    input.addEventListener('input', () => { input.style.borderColor = ''; });
+  </script>
+</body>
+</html>
