@@ -140,8 +140,10 @@ export const invites = [
   { id: 'fieldwork-7kd2pp1w', community: 'fieldwork', by: 'morgan', uses: 12, expires: 'in 1 day' },
 ];
 
+// Days are counted from today; the co-op always lands on the coming Friday.
+const toFriday = (5 - new Date().getDay() + 7) % 7;
 export const events = [
-  { day: 0, h: 20, title: 'Friday co-op', who: ['alex', 'cole', 'mike', 'me'], hue: 0 },
+  { day: toFriday, h: 20, title: 'Friday co-op', who: ['alex', 'cole', 'mike', 'me'], hue: 0 },
   { day: 2, h: 19, title: 'Map night', who: ['mel', 'joe'], hue: 220 },
   { day: 5, h: 21, title: 'Movie watch party', who: ['alex', 'mel', 'me'], hue: 280 },
   { day: 9, h: 18, title: 'Build lab demo', who: ['sam', 'me'], hue: 150 },
