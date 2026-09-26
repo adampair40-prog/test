@@ -21,9 +21,9 @@ const state = {
   unread: { 'friday-coop': 3, setups: 2, 'mel-chat': 1, 'dm-alex': 2 },
   replyTo: null, editing: null, pending: [], format: false, search: '', searchOpen: false,
   typing: {}, drawer: false, calendarOffset: 0, settingsPage: 'appearance',
-  voice: { channel: null, muted: false, deafened: false, sharing: null, focus: false, dock: true, stats: true, levels: {}, speaking: new Set(), joinedAt: 0, ping: [] },
+  voice: { channel: null, muted: false, deafened: false, sharing: null, focus: false, dock: true, stats: true, levels: {}, speaking: new Set(), joinedAt: 0, ping: [], volume: {}, localMute: new Set() },
   share: store.get('share', { quality: 'smooth', codec: 'auto', hud: true }),
-  theme: store.get('theme', { preset: 'midnight', custom: null, accent: null, mode: 'dark', reading: 15.5, density: 'cozy', motion: 'system' }),
+  theme: store.get('theme', { preset: 'fern', custom: null, accent: null, mode: 'dark', reading: 15.5, density: 'cozy', motion: 'system' }),
   notify: store.get('notify', { mentions: true, dms: true, sounds: true, desktop: false }),
   status: 'online',
 };
@@ -115,8 +115,8 @@ function renderTitle() {
   $('#titlebar').innerHTML = `
     <button class="ibtn only-mobile" data-act="drawer" aria-label="Rooms">${icon('menu')}</button>
     <div class="brandline">${brandMark(30)}<b>Krypt</b><span class="version">${VERSION}</span></div>
-    <div class="online-stack" aria-label="Online now">${online.slice(0, 5).map((id) => `<button data-act="profile" data-id="${id}" aria-label="${esc(person(id).name)}">${avatar(id, 'sm', true)}</button>`).join('')}
-      ${online.length > 5 ? `<span class="more">+${online.length - 5}</span>` : ''}</div>
+    <button class="online-stack" id="onlineStack" data-act="members" aria-haspopup="dialog" aria-expanded="false" aria-label="Active community members, ${online.length} online">${online.slice(0, 5).map((id) => avatar(id, 'sm', true)).join('')}
+      ${online.length > 5 ? `<span class="more">+${online.length - 5}</span>` : ''}</button>
     <div class="spacer"></div>
     <button class="search-trigger" data-act="cmdk">${icon('search', 'sm')}<span>Search or jump to…</span><kbd>Ctrl K</kbd></button>
     <button class="ibtn" data-act="settings" aria-label="Settings" title="Settings (Ctrl+,)">${icon('settings')}</button>
@@ -175,6 +175,7 @@ function renderTabs() {
   if (state.dm) {
     const p = person(D.dms.find((d) => d.id === state.dm).with);
     nav.innerHTML = `<div class="tabstrip" role="tablist"><button class="tab" role="tab" aria-selected="true">${icon('message')}${esc(p.name)}</button><span class="tab-indicator"></span></div>
+      <button class="tab-select" data-act="cmdk" aria-label="Jump to a conversation">${icon('message', 'sm')}<span>${esc(p.name)}</span>${icon('chevronDown', 'sm')}</button>
       <div class="tools"><button class="ibtn keep" data-act="dmCall" aria-label="Call">${icon('phone', 'sm')}</button></div>`;
   } else {
     const room = D.rooms[state.room];
@@ -182,8 +183,11 @@ function renderTabs() {
       const ch = D.channels[id]; const count = ch.type === 'voice' ? voiceCount(id) : 0;
       return `<button class="tab" role="tab" data-act="channel" data-id="${id}" aria-selected="${state.channel === id}">${icon(typeIcon[ch.type])}${esc(ch.name)}${count ? `<span class="count">${icon('user', 'xs')}${count}</span>` : ''}${state.unread[id] ? '<span class="tab-dot" aria-label="unread"></span>' : ''}</button>`;
     }).join('')}<span class="tab-indicator" id="indicator"></span></div>
-      <div class="tools"><button class="ibtn keep" data-act="channelMenu" aria-label="All channels">${icon('chevronDown', 'sm')}</button>
-      <button class="ibtn" data-act="newChannel" aria-label="Add a channel">${icon('plus', 'sm')}</button></div>`;
+      <button class="tab-select" data-act="channelMenu" aria-haspopup="menu" aria-expanded="false" aria-label="Channel: ${esc(D.channels[state.channel].name)}">${icon(typeIcon[D.channels[state.channel].type], 'sm')}<span>${esc(D.channels[state.channel].name)}</span>${icon('chevronDown', 'sm')}</button>
+      <div class="tools"><button class="ibtn" data-act="channelMenu" aria-haspopup="menu" aria-expanded="false" aria-label="All channels">${icon('chevronDown', 'sm')}</button>
+      <button class="ibtn sq keep" data-act="newChannel" aria-label="Add a channel" title="Add a channel">${icon('plus', 'sm')}</button>
+      <button class="ibtn keep" data-act="roomMenu" aria-haspopup="menu" aria-expanded="false" aria-label="Room options">${icon('more', 'sm')}</button>
+      <button class="btn room-settings keep" data-act="roomSettings" aria-label="Room settings" title="Room settings">${icon('settings', 'sm')}<span>Room settings</span></button></div>`;
   }
   requestAnimationFrame(moveIndicator);
 }
@@ -222,7 +226,7 @@ function chatView(key, kind) {
   } else {
     const ch = D.channels[key]; const room = D.rooms[state.room];
     title = esc(ch.name);
-    sub = `${esc(room.name)} / Text channel · ${community().members.length} people${ch.topic ? ' · ' + esc(ch.topic) : ''}`;
+    sub = `${esc(room.name)} / Text channel · ${community().members.length} people${ch.topic ? `<span class="topic"> · ${esc(ch.topic)}</span>` : ''}`;
     place = `Message ${ch.name}`; visibility = `Visible to people with access to ${esc(room.name)}`;
   }
   const pins = D.pinned[key];
@@ -651,15 +655,16 @@ function renderVoicebar() {
     return;
   }
   const ch = D.channels[v.channel]; const room = D.rooms[roomOf(v.channel)];
-  $('#voicebar').innerHTML = `<button class="vstatus live" data-act="gotoVoice"><span class="vbars"><i></i><i></i><i></i><i></i><i></i></span><span><b>Voice connected</b><small>${esc(room.name)} · ${esc(ch.name)} · ${participants().length} people</small></span></button>
-    <div class="vpeople">${participants().map((id) => avatar(id, 'sm')).join('')}</div>
+  const watching = !state.dm && state.channel === v.channel;
+  $('#voicebar').innerHTML = `<button class="vstatus live" data-act="gotoVoice" title="${esc(room.name)} · ${esc(ch.name)} · ${participants().length} people"><span class="vbars"><i></i><i></i><i></i><i></i><i></i></span><span><b>Voice connected</b>${watching ? `<small>${esc(room.name)} · ${esc(ch.name)}</small>` : '<small class="back">Return to call</small>'}</span></button>
+    <div class="vpeople">${participants().map((id) => avatar(id, '', false, `data-act="profile" data-id="${id}" role="button" tabindex="0"`)).join('')}</div>
     <div class="speaking-note" id="speakingNote"></div>
     <div class="spacer"></div><div class="vctl">
     <span class="ping" title="Round-trip time">${icon('signal', 'sm')}<span id="pingValue">24 ms</span><svg class="spark" viewBox="0 0 44 18"><path id="pingSpark" d=""/></svg></span>
     <span class="pill ${v.muted ? 'muted' : ''}"><button data-act="mute" aria-pressed="${v.muted}" title="Ctrl+Shift+M">${icon(v.muted ? 'micOff' : 'mic', 'sm')}<span class="mic-meter"><i id="myMeter"></i></span><span>${v.muted ? 'Mic muted' : 'Mic on'}</span></button><button data-act="micMenu" aria-label="Microphone options">${icon('chevronDown', 'sm')}</button></span>
     ${split(icon(v.deafened ? 'headphonesOff' : 'headphones', 'sm'), v.deafened ? 'Deafened' : 'Deafen', 'outMenu', v.deafened ? 'muted' : '', 'deafen', 'opt')}
     <span class="pill ${v.sharing ? 'on' : ''}"><button data-act="${v.sharing ? 'stopShare' : 'sharePicker'}" title="${v.sharing ? 'Stop sharing' : 'Share screen'}">${icon(v.sharing ? 'monitorOff' : 'monitorUp', 'sm')}<span class="opt">${v.sharing ? 'Stop share' : 'Share screen'}</span></button></span>
-    <span class="pill leave"><button data-act="leave" title="Leave call">${icon('leave', 'sm')}<span>Leave</span></button></span></div>`;
+    <span class="pill leave"><button data-act="leave" title="Leave call">${icon('hangup', 'sm')}<span>Leave call</span></button></span></div>`;
 }
 
 // ------------------------------------------------------------------ calendar, docs, tasks
@@ -782,11 +787,66 @@ function react(id, e) {
   $(`.msg[data-mid="${id}"] .reaction[data-e="${e}"]`)?.classList.add('pop');
 }
 
+const STATUS_LABEL = { online: 'Online', idle: 'Away', dnd: 'Do not disturb', offline: 'Offline' };
+const inCall = (id) => !!state.voice.channel && participants().includes(id);
+const inAnyVoice = (id) => inCall(id) || Object.values(D.voiceOccupants).some((list) => list.includes(id));
+function volumeHtml(id) {
+  const v = state.voice.volume[id] ?? 100, muted = state.voice.localMute.has(id);
+  return `<div class="pc-vol"><div class="lbl">Volume for you<span id="volValue">${muted ? 'Muted' : v + '%'}</span></div>
+    <input type="range" id="volRange" min="0" max="200" step="5" value="${v}" style="--p:${v / 2}%" aria-label="Volume for ${esc(person(id).name)}">
+    <div class="btns"><button class="btn sm ${muted ? 'on' : ''}" data-act="localMute" data-id="${id}" aria-pressed="${muted}">${icon(muted ? 'micOff' : 'volume', 'sm')}${muted ? 'Unmute for me' : 'Mute for me'}</button>
+    <button class="btn sm ghost" data-act="resetVolume" data-id="${id}" ${v === 100 && !muted ? 'disabled' : ''}>Reset to 100%</button></div>
+    <small>Only changes what you hear.</small></div>`;
+}
 function profileCard(anchor, id) {
   const p = person(id);
-  const el = openPopover(anchor, `<div class="banner" style="--h:${p.hue}"></div><div class="pc-body">${avatar(id, 'lg', true)}<h3>${esc(p.name)}</h3><div class="handle">@${p.handle} · ${p.status === 'dnd' ? 'Do not disturb' : p.status}</div><p>${esc(p.bio || '')}</p>
-    ${id === 'me' ? `<div class="row-actions"><button class="btn sm" data-act="settings">${icon('settings', 'sm')}Edit profile</button></div>` : `<div class="row-actions"><button class="btn sm primary" data-act="openDm" data-id="${id}">${icon('message', 'sm')}Message</button><button class="btn sm" data-act="dmCall" data-id="${id}">${icon('phone', 'sm')}Call</button></div>`}</div>`, { cls: 'profile-card' });
+  const status = id === 'me' ? state.status : p.status;
+  const where = inAnyVoice(id) ? '<span class="live">In voice</span>' : STATUS_LABEL[status] || status;
+  const el = openPopover(anchor, `<div class="banner" style="--h:${p.hue}"></div><div class="pc-body">${avatar(id, 'lg', true)}<h3>${esc(p.name)}</h3><div class="pc-sub">@${p.handle} · ${where} · Member</div><p>${esc(p.bio || '')}</p>
+    ${id === 'me' ? `<div class="row-actions"><button class="btn sm" data-act="settings">${icon('settings', 'sm')}Edit profile</button></div>` : `<div class="row-actions"><button class="btn sm primary" data-act="openDm" data-id="${id}">${icon('message', 'sm')}Message</button><button class="btn sm" data-act="dmCall" data-id="${id}">${icon('phone', 'sm')}Call</button></div>
+    <div class="row-actions"><button class="btn sm ghost" data-act="copyName" data-id="${id}">${icon('copy', 'sm')}Copy name</button></div>`}
+    ${id !== 'me' && inCall(id) ? volumeHtml(id) : ''}</div>`, { cls: 'profile-card' });
   el.style.setProperty('--h', p.hue);
+  wireVolume(el, id);
+}
+function wireVolume(el, id) {
+  const r = $('#volRange', el); if (!r) return;
+  r.addEventListener('input', () => {
+    const v = Number(r.value); state.voice.volume[id] = v; state.voice.localMute.delete(id);
+    r.style.setProperty('--p', v / 2 + '%'); $('#volValue', el).textContent = v + '%';
+    const reset = $('[data-act="resetVolume"]', el); if (reset) reset.disabled = v === 100;
+    const mute = $('[data-act="localMute"]', el); if (mute?.classList.contains('on')) { mute.classList.remove('on'); mute.setAttribute('aria-pressed', 'false'); mute.innerHTML = icon('volume', 'sm') + 'Mute for me'; }
+  });
+}
+function refreshVolume(id) { const box = $('.popover .pc-vol'); if (!box) return; box.outerHTML = volumeHtml(id); wireVolume(popover.el, id); }
+
+function membersPopover(anchor) {
+  const ids = community().members.filter((m) => m !== 'me');
+  const rank = (id) => inAnyVoice(id) ? 0 : { online: 1, idle: 2, dnd: 3, offline: 4 }[person(id).status] ?? 5;
+  ids.sort((a, b) => rank(a) - rank(b) || person(a).name.localeCompare(person(b).name));
+  const rows = (q) => {
+    const list = ids.filter((id) => !q || person(id).name.toLowerCase().includes(q) || person(id).handle.includes(q));
+    return list.length ? list.map((id) => `<button class="menu-item" data-act="memberCard" data-id="${id}">${avatar(id, 'sm', true)}<span class="t">${esc(person(id).name)}<small class="${inAnyVoice(id) ? 'live' : ''}">${inAnyVoice(id) ? 'In voice' : STATUS_LABEL[person(id).status]}</small></span></button>`).join('')
+      : `<div class="mp-empty">No one called “${esc(q)}”</div>`;
+  };
+  const el = openPopover(anchor, `<div class="mp-head"><b>Active community members</b><input id="memberFind" placeholder="Find a member" autocomplete="off" aria-label="Find a member"></div><div class="mp-list" id="memberList">${rows('')}</div>`, { cls: 'members-pop', keepFocus: true });
+  el.setAttribute('role', 'dialog');
+  const input = $('#memberFind', el);
+  input.addEventListener('input', () => { $('#memberList', el).innerHTML = rows(input.value.trim().toLowerCase()); });
+  input.focus({ preventScroll: true });
+}
+
+function roomSettingsModal() {
+  closePopover();
+  const room = D.rooms[state.room];
+  modal(`<header>${icon('settings')}<h2>Room settings</h2><button class="ibtn" data-act="closeModal" aria-label="Close">${icon('x')}</button></header>
+    <div class="mbody">
+      <div class="field" style="border-top:0;padding-top:0"><label for="roomName">Name<small>Shown to everyone in ${esc(community().name)}</small></label><input id="roomName" value="${esc(room.name)}" style="height:40px;padding:0 12px;border-radius:var(--r-md);border:1px solid var(--line-2);background:var(--sunken)"></div>
+      <div class="field" style="align-items:start"><div class="label">Channels<small>${room.channels.length} in this room</small></div><div style="display:grid;gap:4px">${room.channels.map((id) => `<div class="menu-item" style="cursor:default">${icon(typeIcon[D.channels[id].type])}${esc(D.channels[id].name)}<span class="hint">${D.channels[id].type}</span></div>`).join('')}
+        <button class="menu-item" data-act="newChannel">${icon('plus')}Add a channel</button></div></div>
+      <div class="field"><div class="label">Notifications<small>For every channel in this room</small></div>${toggle('room_notify', true, 'Room notifications')}</div>
+    </div>
+    <footer><button class="btn ghost" data-act="closeModal">Cancel</button><button class="btn primary" data-act="saveRoom">Save</button></footer>`, { label: 'Room settings' });
 }
 
 // ------------------------------------------------------------------ command palette
@@ -1002,10 +1062,12 @@ function go(communityId, roomId, channelId) {
   state.drawer = false;
   if (changedCommunity) { renderTitle(); renderCommunity(); }
   renderSide(); renderTabs(); renderMain();
+  if (state.voice.channel) renderVoicebar();
 }
 function openDm(id) {
   state.dm = id; state.unread[id] = 0; state.replyTo = null; state.editing = null; state.searchOpen = false; state.search = ''; state.drawer = false;
   renderSide(); renderTabs(); renderMain();
+  if (state.voice.channel) renderVoicebar();
 }
 function startDm(personId) {
   let d = D.dms.find((x) => x.with === personId);
@@ -1071,6 +1133,17 @@ const act = {
   signout() { closePopover(); toast('This is a design preview', 'Signing out would remove this browser’s device key', 'info'); },
   profile(el) { if (popover?.el.contains(el)) closePopover(); profileCard(el.closest('button, .avatar, b') || el, el.dataset.id || el.closest('[data-person]')?.dataset.person); },
   openDm(el) { closePopover(); startDm(el.dataset.id); },
+  members(el) { membersPopover(el); },
+  memberCard(el) { const id = el.dataset.id; closePopover(); profileCard($('#onlineStack'), id); },
+  copyName(el) { navigator.clipboard?.writeText(person(el.dataset.id).name).catch(() => {}); toast('Name copied', person(el.dataset.id).name, 'copy', 'ok'); },
+  localMute(el) { const id = el.dataset.id, s = state.voice.localMute; if (s.has(id)) s.delete(id); else s.add(id); refreshVolume(id); toast(s.has(id) ? `${person(id).name} muted for you` : `${person(id).name} unmuted`, 'Only changes what you hear', s.has(id) ? 'micOff' : 'volume'); },
+  resetVolume(el) { const id = el.dataset.id; delete state.voice.volume[id]; state.voice.localMute.delete(id); refreshVolume(id); },
+  roomMenu(el) {
+    openPopover(el, `<div class="menu-label">${esc(D.rooms[state.room].name)}</div><button class="menu-item" data-act="roomSettings">${icon('settings')}Room settings</button><button class="menu-item" data-act="newChannel">${icon('plus')}Add a channel</button><button class="menu-item" data-act="invite">${icon('users')}Invite people</button><div class="menu-sep"></div><button class="menu-item" data-act="markRead">${icon('check')}Mark all as read</button><button class="menu-item" data-act="toastMute">${icon('bell')}Mute room</button><button class="menu-item" data-act="toastCopy">${icon('link')}Copy room link</button>`, { align: 'end' });
+  },
+  roomSettings() { roomSettingsModal(); },
+  saveRoom() { const name = $('#roomName')?.value.trim(); if (name) D.rooms[state.room].name = name; closeModal(); renderSide(); renderTabs(); renderMain(); toast('Room saved', name || '', 'checkCircle', 'ok'); },
+  markRead() { closePopover(); for (const c of D.rooms[state.room].channels) delete state.unread[c]; renderSide(); renderTabs(); toast('All caught up', D.rooms[state.room].name, 'check', 'ok'); },
   dmCall(el) { closePopover(); const who = el.dataset.id || D.dms.find((d) => d.id === state.dm)?.with; toast(`Calling ${person(who).name}…`, 'Ringing on their devices', 'phone'); },
   // chat
   send() { send(); },
@@ -1177,7 +1250,7 @@ document.addEventListener('click', (e) => {
   if (popover && !popover.el.contains(e.target) && !(el && popover.anchor === el)) closePopover();
   if (!el) return;
   const name = el.dataset.act;
-  if (popover && popover.anchor === el && ['communityMenu', 'meMenu', 'channelMenu', 'micMenu', 'outMenu', 'convMenu'].includes(name)) { closePopover(); return; }
+  if (popover && popover.anchor === el && ['communityMenu', 'meMenu', 'channelMenu', 'micMenu', 'outMenu', 'convMenu', 'roomMenu', 'members'].includes(name)) { closePopover(); return; }
   if (act[name]) { e.preventDefault(); act[name](el, e); }
 });
 document.addEventListener('keydown', (e) => {
